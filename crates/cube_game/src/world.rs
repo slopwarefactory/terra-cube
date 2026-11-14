@@ -458,7 +458,9 @@ fn sky(
         // (And under a quarter of the way up it is not drawn at all: the engine's disc has
         // no red in it at any brightness, and `vault` draws a low sun instead.)
         let high = ((to_sun.y - 0.12) / 0.28).clamp(0.0, 1.0);
-        disk.intensity = if high > 0.0 { 10f32.powf(-3.0 * (1.0 - high * high * (3.0 - 2.0 * high))) } else { 0.0 };
+        // (And under cloud it is a pale place in the grey, if that.)
+        let clear = 1.0 - overcast(hour);
+        disk.intensity = if high > 0.0 { 10f32.powf(-3.0 * (1.0 - high * high * (3.0 - 2.0 * high))) * clear * clear * clear } else { 0.0 };
         // Where it stands and how big it is are where the cloud shadows lie and how big they
         // are: they drift downwind.
         let drift = Vec3::new(0.8, 0.0, 0.6) * (time.elapsed_secs() * CLOUD_DRIFT);
@@ -478,7 +480,7 @@ fn sky(
         // a dull day is flat and without hard shadows. (`sky::cloud`; rain fell out of a
         // sunlit sky until this.)
         let cloud = overcast(hour);
-        light.illuminance = lux::RAW_SUNLIGHT * glow * (1.0 + 0.8 * low * low) * (1.0 - 0.7 * cloud * cloud);
+        light.illuminance = lux::RAW_SUNLIGHT * glow * (1.0 + 0.8 * low * low) * (1.0 - (0.7 + 0.3 * low) * cloud * cloud);
         // The air here reddens a low sun only a little; an evening wants amber.
         light.color = Color::srgb(1.0, 1.0 - 0.08 * low * low, 1.0 - 0.18 * low * low);
         // Mist thins as the sun drops, or the low light floods it and whites the picture out,
@@ -506,7 +508,13 @@ fn sky(
     // is left of it is set by how it looks in the picture, whatever the exposure has become.
     let open = by_height(&EXPOSURE, to_sun.y);
     let sheltered = 1.0 + (CAVE_SKY * 2f32.powf(exposed(to_sun.y, 1.0) - open) - 1.0) * roofed.0;
-    *ambient = GlobalAmbientLight { color: cold, brightness: (0.55 + 0.1 * cube_sim::sky::moonlight(hour)) * (1.0 - day) * sheltered, ..default() };
+    // Under an overcast with the sun low there is no sun on the land and the air's own light
+    // is thin: the land at a dull dawn was black. The clouded sky fills it then, as the
+    // night's floor does the night, as bright in the picture at whatever the exposure is.
+    let dull = overcast(hour).powi(2) * (1.0 - ((to_sun.y - 0.05) / 0.3).clamp(0.0, 1.0)) * ((to_sun.y + 0.24) / 0.1).clamp(0.0, 1.0);
+    let fill = 3.0 * dull * 2f32.powf(open - NIGHT_EV);
+    let cold = if dull > 0.0 { Color::srgb(0.72, 0.76, 0.84) } else { cold };
+    *ambient = GlobalAmbientLight { color: cold, brightness: ((0.55 + 0.1 * cube_sim::sky::moonlight(hour)) * (1.0 - day) + fill) * sheltered, ..default() };
     // The haze is what the far land and the far sea go into, so it has to be the colour the
     // sky has at its edge at that hour: where it was not, the sea was a bar under the sky.
     // It is as bright as the sky's edge is in the picture, which stays bright all through
@@ -524,8 +532,12 @@ fn sky(
     // (Not quite as bright once the sun is under: the land near to is dark by then, and haze
     // as bright as the sky lay on it like milk.)
     let lit = lit * (0.5 + 0.5 * day);
-    let away = Vec3::new(0.62, 0.74, 0.88).lerp(Vec3::new(0.72, 0.57, 0.57), low) * lit + dark;
-    let toward = Vec3::new(1.0, 0.86, 0.62).lerp(Vec3::new(1.0, 0.62, 0.4), low);
+    // Under an overcast it is the grey of the clouded sky (`vault`), toward the sun too.
+    let grey = overcast(hour);
+    let grey = grey * grey;
+    let clouded = Vec3::new(0.64, 0.67, 0.71);
+    let away = Vec3::new(0.62, 0.74, 0.88).lerp(Vec3::new(0.72, 0.57, 0.57), low).lerp(clouded, grey) * lit + dark;
+    let toward = Vec3::new(1.0, 0.86, 0.62).lerp(Vec3::new(1.0, 0.62, 0.4), low).lerp(clouded, grey);
     for (mut exposure, mut fog, mut grade, mut skylight, filled, mut bloom, eye) in &mut cameras {
         exposure.ev100 = exposed(to_sun.y, roofed.0);
         // What has a light of its own (a flame, the moon, a firefly) has more of a glow
@@ -556,6 +568,8 @@ fn sky(
         let blue = ((-0.02 - to_sun.y) / 0.1).clamp(0.0, 1.0) * ((to_sun.y + 0.26) / 0.1).clamp(0.0, 1.0);
         // (More so the further under: the air's twilight browns as it dims.)
         let deep = 1.0 + 0.7 * ((-0.1 - to_sun.y) / 0.1).clamp(0.0, 1.0);
+        // (Under an overcast there is no blue hour: the grade turned the grey sky blue.)
+        let blue = blue * (1.0 - 0.85 * grey);
         grade.global.temperature = -0.07 * blue * deep;
         grade.global.tint = 0.05 * blue * deep;
         fog.color = Color::srgba(away.x, away.y, away.z, 1.0);

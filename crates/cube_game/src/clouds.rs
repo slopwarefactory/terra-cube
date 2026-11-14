@@ -379,11 +379,15 @@ fn drift(time: Res<Time>, live: Option<Res<crate::motion::Live>>, kinds: Res<Kin
 /// left it at that height. Set for the camera's exposure here.
 fn lit(live: Option<Res<crate::motion::Live>>, kinds: Res<Kinds>, cameras: Query<&Exposure, With<Camera3d>>, mut materials: ResMut<Assets<Cloudy>>, mut was: Local<Vec3>) {
     let Some(exposure) = cameras.iter().next() else { return };
-    let to_sun = cube_sim::sky::sun(live.map_or(cube_sim::sky::START, |l| l.0.when));
+    let to_sun = cube_sim::sky::sun(live.as_ref().map_or(cube_sim::sky::START, |l| l.0.when));
     // The sun's colour up there (`vault::through`). A cloud is high enough to have a last
     // deep red for a little after the land has none.
     let through = crate::vault::through(to_sun.y) * ((to_sun.y + 0.09) / 0.08).clamp(0.0, 1.0);
-    let glow = through * (lux::RAW_SUNLIGHT / std::f32::consts::PI * exposure.exposure());
+    // (Under an overcast there is much cloud over every cloud: they are grey, not white.)
+    let when = live.as_ref().map_or(cube_sim::sky::START, |l| l.0.when);
+    let glow = through * (lux::RAW_SUNLIGHT / std::f32::consts::PI * exposure.exposure()) * (1.0 - 0.82 * crate::world::overcast(when));
+    // (And have none of a low sun's red, which does not get in under the rest.)
+    let glow = glow.lerp(Vec3::splat(glow.element_sum() / 3.0), crate::world::overcast(when));
     if (glow - *was).abs().max_element() < 0.002 {
         return;
     }
@@ -394,6 +398,6 @@ fn lit(live: Option<Res<crate::motion::Live>>, kinds: Res<Kinds>, cameras: Query
         // The sky's blue is on a cloud's shaded side while the sun is low and still up or
         // just under: by day the engine's own sky light is enough, and at night there is none.
         let low = (1.0 - ((to_sun.y - 0.02) / 0.4).abs()).clamp(0.0, 1.0) * ((to_sun.y + 0.12) / 0.06).clamp(0.0, 1.0);
-        material.extension.shade = (Vec3::new(0.10, 0.15, 0.36) * (0.75 * low)).extend(0.0);
+        material.extension.shade = (Vec3::new(0.10, 0.15, 0.36) * (0.75 * low * (1.0 - crate::world::overcast(when)))).extend(0.0);
     }
 }

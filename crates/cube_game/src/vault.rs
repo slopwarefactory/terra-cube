@@ -12,6 +12,9 @@
 //! - *A glow round the sun*, the light the air throws forward round it, which the air's
 //!   own picture of the sky is too coarse to hold: without it the sun was a white dot.
 //! - *A ring of light round the moon.*
+//! - *A grey sky under an overcast.* The air knows of no weather: between the clouds of a
+//!   wet day it was a fine day's blue. A veil the grey of a clouded sky is laid over it by
+//!   how much cloud there is (`world::overcast`), and over the stars and the sun's glow.
 //!
 //! They are dressing, like the stars (`air`): the simulation knows of none of it.
 
@@ -41,7 +44,7 @@ struct Halo;
 
 /// Their materials, in that order, and what each was last set to.
 #[derive(Resource)]
-struct Lights([Handle<StandardMaterial>; 5]);
+struct Lights([Handle<StandardMaterial>; 6]);
 
 /// The night sky with no moon, overhead: what is added to the air's own. (As the picture has
 /// it, not as light: these are not lit and the camera's exposure does not touch them.)
@@ -52,6 +55,10 @@ const BLUED: f32 = 0.62;
 /// How far out from the sun its glow reaches and from the moon its ring, radians.
 const AUREOLE: f32 = 0.3;
 const HALO: f32 = 0.12;
+/// A clouded sky by day, as the picture has it, and how much of the sky it takes when the
+/// cloud is whole. At night it is a little over the night's floor.
+const GREY: Vec3 = Vec3::new(0.30, 0.33, 0.37);
+const VEILED: f32 = 0.93;
 
 /// The sky as a bowl round the camera, from a little under the land's edge to overhead; each
 /// point coloured by how high it is (the sine of it).
@@ -117,7 +124,7 @@ fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials
     // Each has its own light and no other, is not hazed, and is laid over what is behind it:
     // added to it, or (the blue) blended with it by how much of it there is at each point.
     let mut laid = |mode: AlphaMode| materials.add(StandardMaterial { base_color: Color::BLACK, unlit: true, alpha_mode: mode, fog_enabled: false, cull_mode: None, ..default() });
-    let lights = [laid(AlphaMode::Add), laid(AlphaMode::Blend), laid(AlphaMode::Add), laid(AlphaMode::Add), laid(AlphaMode::Blend)];
+    let lights = [laid(AlphaMode::Add), laid(AlphaMode::Blend), laid(AlphaMode::Add), laid(AlphaMode::Add), laid(AlphaMode::Blend), laid(AlphaMode::Blend)];
     let far = Transform::from_xyz(0.0, -50_000.0, 0.0);
     // The night's floor: three times as light at the land's edge as overhead.
     let floor = bowl(|up| {
@@ -131,6 +138,12 @@ fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials
     });
     commands.spawn((Vault, Mesh3d(meshes.add(floor)), MeshMaterial3d(lights[0].clone()), far, NotShadowCaster));
     commands.spawn((Vault, Mesh3d(meshes.add(blue)), MeshMaterial3d(lights[1].clone()), far, NotShadowCaster));
+    // The veil: the same all over, a little lighter at the land's edge.
+    let veil = bowl(|up| {
+        let edge = 1.0 + 0.25 * (1.0 - up.max(0.0)).powi(3);
+        [edge, edge, edge, 1.0]
+    });
+    commands.spawn((Vault, Mesh3d(meshes.add(veil)), MeshMaterial3d(lights[5].clone()), far, NotShadowCaster));
     let glow = meshes.add(round(&GLOW));
     commands.spawn((Aureole, Mesh3d(glow.clone()), MeshMaterial3d(lights[2].clone()), far, NotShadowCaster));
     commands.spawn((Halo, Mesh3d(glow), MeshMaterial3d(lights[3].clone()), far, NotShadowCaster));
@@ -156,7 +169,7 @@ fn turn(
     mut aureole: Query<&mut Transform, (With<Aureole>, Without<Halo>, Without<LowSun>)>,
     mut halo: Query<&mut Transform, (With<Halo>, Without<LowSun>)>,
     mut low_sun: Query<&mut Transform, With<LowSun>>,
-    mut was: Local<[Vec4; 5]>,
+    mut was: Local<[Vec4; 6]>,
 ) {
     let Some(eye) = cameras.iter().next().map(|c| c.translation()) else { return };
     let when = live.map_or(sky::START, |l| l.0.when);
@@ -183,7 +196,10 @@ fn turn(
     let floor = NIGHT * dark * (1.0 - 0.5 * sky::moonlight(when));
     // The blue is for a sun within a hand of the land's edge, over or under.
     let low = (1.0 - ((to_sun.y - 0.02) / 0.26).abs()).clamp(0.0, 1.0);
-    let blued = BLUED * low.sqrt() * (1.0 - dark);
+    // (Not under an overcast, which has no blue to bring out.)
+    let cloud = crate::world::overcast(when);
+    let closed = ((cloud - 0.45) / 0.5).clamp(0.0, 1.0);
+    let blued = BLUED * low.sqrt() * (1.0 - dark) * (1.0 - closed);
     // The sun's glow is its own colour at that height, and goes out as it goes under.
     let tint = through(to_sun.y);
     // (Half white: laid on a sky already as red as a picture can be, its own colour alone
@@ -197,7 +213,12 @@ fn turn(
     // only twice white, the tonemapper made it a dull disc darker than the sky round it.)
     let own = (tint / tint.max_element()).powf(0.6) * 7.0;
     let disc = own.extend(sunk.min(((to_sun.y + 0.03) / 0.03).clamp(0.0, 1.0)));
-    let now = [floor.extend(1.0), BLUE.extend(blued), sun.extend(1.0), moon.extend(1.0), disc];
+    // The veil is as light as the day is, and holds its tone through twilight as the haze
+    // does (the exposure follows the light down); only a sky more than half clouded greys.
+    let lit = ((to_sun.y + 0.24) / 0.14).clamp(0.0, 1.0);
+    let lit = lit * lit * (3.0 - 2.0 * lit) * (0.5 + 0.5 * day);
+    let veil = (GREY * lit + NIGHT * 1.6 * (1.0 - lit)).extend(VEILED * closed * closed * (3.0 - 2.0 * closed));
+    let now = [floor.extend(1.0), BLUE.extend(blued), sun.extend(1.0), moon.extend(1.0), disc, veil];
     for (i, colour) in now.into_iter().enumerate() {
         if (colour - was[i]).abs().max_element() < 0.0004 {
             continue;
