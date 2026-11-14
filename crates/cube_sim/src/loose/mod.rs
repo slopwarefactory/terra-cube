@@ -335,6 +335,16 @@ impl Thing {
         });
         Form { limbs: limbs.into_iter().collect(), clumps: Vec::new(), stones: Vec::new() }
     }
+    /// The length of its trunk an axe is at as it stands, between its stump and the rest: for
+    /// whoever draws it, with the notch cut out of it.
+    pub fn band(&self) -> Form {
+        let limbs = self.limbs.iter().find(|l| l.roots > 0).or(self.limbs.first()).map(|l| {
+            let at = ((crate::plants::Limb::UNDER + 0.9) / (l.b.y - l.a.y).max(0.1)).min(0.8);
+            let (from, to) = (at - CELL * 0.5 / l.a.distance(l.b).max(0.1), (at + CELL * 1.5 / l.a.distance(l.b).max(0.1)).min(0.95));
+            crate::plants::Limb { a: l.a.lerp(l.b, from), b: l.a.lerp(l.b, to), ra: l.ra + (l.rb - l.ra) * from, rb: l.ra + (l.rb - l.ra) * to, roots: 0, ..*l }
+        });
+        Form { limbs: limbs.into_iter().collect(), clumps: Vec::new(), stones: Vec::new() }
+    }
     /// Whether a ball reaches it as it stood.
     fn reached(&self, middle: Vec3, radius: f32) -> bool {
         self.limbs.iter().any(|l| from_line(middle, l.a, l.b) < radius + l.ra.max(l.rb) * if l.roots > 0 { 2.6 } else { 1.0 } + CELL) || self.stone.as_ref().is_some_and(|s| ((middle - s.middle) / (s.radii + radius + CELL)).length_squared() < 1.0)

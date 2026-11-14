@@ -407,7 +407,10 @@ impl Loose {
         // Begun leaning three degrees and already turning, it was half way down in a second.)
         // (Hunks one on another are not a pole: they come straight down.)
         let hunk = cells.values().all(|p| matches!(p, Part::Whole(b) if b.hunk()));
-        let over = (!hunk && tall > 2.0 && tall > wide * 2.5).then_some((way, 0.02, 0.04));
+        // (But seen to go from the blow that cut it: begun at one degree and all but still,
+        // it stood for two seconds as if nothing had happened and then came down in one,
+        // "the tree falls at a weird rate", the developer, 2026-11-14.)
+        let over = (!hunk && tall > 2.0 && tall > wide * 2.5).then_some((way, 0.03, 0.10));
         // Where it is tried against the world: some hundreds of its cells, spread through it.
         // (Its wood and stone, not its leaves: a crown goes through another crown, and
         // into the ground a little, before the wood under it is stopped.)

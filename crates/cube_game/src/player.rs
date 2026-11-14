@@ -727,6 +727,17 @@ fn edit(mut regions: ResMut<crate::world::Regions>, mut controls: ResMut<Control
             }
             grown.again(*region);
         }
+        // (A tree an axe is at is drawn alone from its first blow, with its notch: `loose::felled`.)
+        for region in &near {
+            let Some(form) = forms.0.get_mut(region) else { continue };
+            let struck: std::collections::HashSet<u32> = form.limbs.iter().filter(|l| live.0.loose.things.iter().filter(|t| t.notch.is_some()).any(|t| t.limbs.iter().any(|m| m.a == l.a && m.b == l.b))).map(|l| l.tree).collect();
+            if !struck.is_empty() {
+                let form = std::sync::Arc::make_mut(form);
+                form.limbs.retain(|l| !struck.contains(&l.tree));
+                form.clumps.retain(|c| !struck.contains(&c.tree));
+                grown.again(*region);
+            }
+        }
         // (What the ball itself reached is drawn again; what was cut away is his.)
         let reach = Vec3::splat(bite + cube_voxel::CELL);
         let (lo, hi) = (((middle - reach) / cube_voxel::CELL).floor().as_ivec3().div_euclid(IVec3::splat(cube_voxel::CHUNK)), ((middle + reach) / cube_voxel::CELL).floor().as_ivec3().div_euclid(IVec3::splat(cube_voxel::CHUNK)));

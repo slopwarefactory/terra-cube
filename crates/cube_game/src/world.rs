@@ -1130,7 +1130,7 @@ fn regions(args: Res<crate::Args>, loading: Res<crate::loading::Loading>, terrai
             // What is cells again is no longer among the shapes drawn.
             for r in &near {
                 let Some(form) = forms.0.get_mut(r).map(std::sync::Arc::make_mut) else { continue };
-                let cut: HashSet<u32> = form.limbs.iter().filter(|l| again.things.iter().filter(|t| t.felled || t.cells).any(|t| t.limbs.iter().any(|m| m.a == l.a && m.b == l.b))).map(|l| l.tree).collect();
+                let cut: HashSet<u32> = form.limbs.iter().filter(|l| again.things.iter().filter(|t| t.felled || t.cells || t.notch.is_some()).any(|t| t.limbs.iter().any(|m| m.a == l.a && m.b == l.b))).map(|l| l.tree).collect();
                 let before = (form.limbs.len(), form.stones.len());
                 form.limbs.retain(|l| !cut.contains(&l.tree));
                 form.clumps.retain(|c| !cut.contains(&c.tree));

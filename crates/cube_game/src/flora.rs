@@ -80,6 +80,21 @@ pub struct Shape {
     /// tree bends by in the wind, its top most. Nothing for a stone.
     high: Vec<[f32; 2]>,
     indices: Vec<u32>,
+    /// A notch to be cut out of the wood drawn: `cube_sim::loose::Thing::notch`.
+    notch: Option<Notch>,
+}
+
+/// The middle of a trunk where an axe is at it, which way the blows go in, how thick it is
+/// there and how deep they have got.
+pub type Notch = (Vec3, Vec3, f32, f32);
+
+/// Whether a place is in the wedge an axe has cut: open on the side the blows come from, as
+/// high as a hand and a half at its mouth, closing to nothing as deep as they have got.
+fn wedge((middle, into, thick, deep): Notch, p: Vec3) -> bool {
+    let d = p - (middle + Vec3::Y * 0.09);
+    // (From outside the bark, which swells past the trunk's own thickness.)
+    let (inward, reach) = (d.dot(into) + thick * 1.6, deep * 1.2 + thick * 0.6);
+    inward < reach && d.y.abs() <= 0.05 + 0.17 * (1.0 - (inward / reach).clamp(0.0, 1.0))
 }
 
 impl Shape {
@@ -411,7 +426,7 @@ fn grow(mut commands: Commands, args: Res<crate::Args>, loading: Res<crate::load
         if let std::collections::hash_map::Entry::Vacant(slot) = grown.1.entry(region) {
             let (form, land, shapes) = (forms.0[&region].clone(), terrain.1.clone(), args.shapes);
             let origin = Vec3::new(region.0 as f32 * size, 0.0, region.1 as f32 * size);
-            slot.insert((level, pool.spawn(async move { shape_of(&form, &land, origin, level, shapes) })));
+            slot.insert((level, pool.spawn(async move { shape_of(&form, &land, origin, level, shapes, None) })));
         }
     }
     cost.grow += began.elapsed().as_secs_f32();
@@ -421,8 +436,8 @@ fn grow(mut commands: Commands, args: Res<crate::Args>, loading: Res<crate::load
 /// One tree alone, as it is drawn up close, about `origin`: for a tree that an axe has
 /// felled, which is drawn as the tree it was wherever it now is (`loose::felled`). Nothing
 /// of it bends in the wind: it is not standing.
-pub fn alone(form: &Form, land: &cube_sim::terrain::Land, origin: Vec3) -> Mesh {
-    let mut shape = shape_of(form, land, origin, 0, false);
+pub fn alone(form: &Form, land: &cube_sim::terrain::Land, origin: Vec3, notch: Option<Notch>) -> Mesh {
+    let mut shape = shape_of(form, land, origin, 0, false, notch);
     for high in &mut shape.high {
         high[0] = 0.0;
     }
@@ -436,9 +451,9 @@ pub fn alone(form: &Form, land: &cube_sim::terrain::Land, origin: Vec3) -> Mesh 
         .with_inserted_indices(Indices::U32(shape.indices))
 }
 
-fn shape_of(form: &Form, land: &cube_sim::terrain::Land, origin: Vec3, level: u8, shapes: bool) -> Shape {
+fn shape_of(form: &Form, land: &cube_sim::terrain::Land, origin: Vec3, level: u8, shapes: bool, notch: Option<Notch>) -> Shape {
     let ground = |x: f32, z: f32| land.height((x / CELL).floor() as i32, (z / CELL).floor() as i32) as f32 * CELL;
-    let mut shape = Shape::default();
+    let mut shape = Shape { notch, ..default() };
     let mut still = (0, 0);
     // An end is cut wood if no other limb starts or stops there.
     let key = |p: Vec3| p.to_array().map(f32::to_bits);
@@ -634,6 +649,10 @@ impl Shape {
             });
             self.wood(&above, wide, origin, limb, n, cut, 0.0);
         }
+        // (An axe's notch is those cubes gone: a cut into the trunk, not a thing put on it.)
+        if let Some(notch) = self.notch {
+            set.retain(|c| !wedge(notch, (c.as_vec3() + 0.5) * g));
+        }
         let free = ((0.16 - thick) / 0.16).clamp(0.0, 1.0) * 0.25;
         self.wood(&set, g, origin, limb, n, cut, free);
     }
@@ -648,8 +667,13 @@ impl Shape {
         let colour = bark.colors().1;
         let grain = if bark == Block::Birch { Grain::BirchBark } else { Grain::Bark };
         let moss = Block::Moss.colors().0;
+        let notch = self.notch;
         self.cubes(set, g, origin, free, |c, face| {
             let p = (c.as_vec3() + 0.5) * g;
+            // (What looks into an axe's notch is cut wood.)
+            if notch.is_some_and(|n| wedge(n, p + face.as_vec3() * g)) {
+                return (cube_voxel::mesh::CUT.map(|v| v * (0.9 + 0.2 * hashed(c, 4))), Grain::Split);
+            }
             let axial = (p - a).dot(along);
             let end = face.as_vec3().dot(along);
             // Cut wood, where nothing grows on from an end.

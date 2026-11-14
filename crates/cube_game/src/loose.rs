@@ -13,12 +13,13 @@ pub struct LoosePlugin;
 
 impl Plugin for LoosePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (fall, felled, notched, told, chips).after(crate::motion::tick)).add_systems(PostUpdate, carried.after(bevy::transform::TransformSystems::Propagate));
+        app.add_systems(Update, (fall, felled, told, chips).after(crate::motion::tick)).add_systems(PostUpdate, carried.after(bevy::transform::TransformSystems::Propagate));
     }
 }
 
 /// A felled tree, drawn as the tree it was: which ([`cube_sim::loose::Thing::id`]), and as
-/// what: with its boughs and leaf (0), bare (1), or its stump (2).
+/// what: with its boughs and leaf (0), bare (1), its stump (2), or the length of its trunk an
+/// axe is at as it stands, with the notch so many blows deep (3 and that many).
 #[derive(Component)]
 struct Felled(u32, u8);
 
@@ -31,13 +32,18 @@ struct Felled(u32, u8);
 fn felled(mut commands: Commands, live: Option<Res<Live>>, look: Option<Res<crate::world::Look>>, terrain: Option<Res<crate::world::Terrain>>, mut drawn: Query<(Entity, &Felled, &mut Transform, &mut Visibility)>, mut meshes: ResMut<Assets<Mesh>>, mut making: Local<std::collections::HashMap<(u32, u8), bevy::tasks::Task<Mesh>>>) {
     let (Some(live), Some(look), Some(terrain)) = (live, look, terrain) else { return };
     let loose = &live.0.loose;
+    // (An axe's notch is a wedge cut out of the trunk's own cubes, pale inside: the tree
+    // stands drawn alone from its first blow, in three lengths, and the one the axe is at
+    // is made again a blow deeper each time. Until 2026-11-14 it was a pale box with dark
+    // slabs over and under it put on the bark: "this weird rendering glitch", the developer.)
+    let notch = |t: &cube_sim::loose::Thing| t.notch.filter(|_| !t.felled && !t.cells);
     // What is to be drawn of each tree: itself as it now is, and its stump.
-    let wanted: Vec<(&cube_sim::loose::Thing, u8)> = loose.things.iter().filter(|t| !t.limbs.is_empty()).flat_map(|t| [(!t.cells).then_some((t, t.limbed as u8)), (t.stump || !t.felled && !t.cells).then_some((t, 2))].into_iter().flatten()).collect();
+    let wanted: Vec<(&cube_sim::loose::Thing, u8)> = loose.things.iter().filter(|t| !t.limbs.is_empty()).flat_map(|t| [(!t.cells).then_some((t, t.limbed as u8)), (t.stump || !t.felled && !t.cells).then_some((t, 2)), notch(t).map(|_| (t, 3 + t.blows.min(200) as u8))].into_iter().flatten()).collect();
     // Where it is: where it grew, moved as it lies and then as the piece it is while it
     // falls or settles moves it. Its stump is where it grew.
     let place = |t: &cube_sim::loose::Thing, what: u8| {
         let origin = t.limbs[0].a;
-        if what == 2 {
+        if what >= 2 {
             return Transform::from_translation(origin);
         }
         let lain = |p: Vec3| t.lies.map_or(p, |(pivot, shift, turn)| pivot + shift + turn * (p - pivot));
@@ -46,11 +52,11 @@ fn felled(mut commands: Commands, live: Option<Res<Live>>, look: Option<Res<crat
         let turn = piece.map_or(Quat::IDENTITY, |p| p.turn) * t.lies.map_or(Quat::IDENTITY, |l| l.2);
         Transform { translation: at, rotation: turn, scale: Vec3::ONE }
     };
-    let shown = |t: &cube_sim::loose::Thing| if t.felled { Visibility::Inherited } else { Visibility::Hidden };
+    let shown = |t: &cube_sim::loose::Thing| if t.felled || t.notch.is_some() { Visibility::Inherited } else { Visibility::Hidden };
     // (As it was drawn, until it is ready as it now is: bare, once its boughs are off.)
     let have: std::collections::HashSet<(u32, u8)> = drawn.iter().map(|(_, f, ..)| (f.0, f.1)).collect();
     for (entity, felled, mut at, mut seen) in &mut drawn {
-        let still = wanted.iter().find(|(t, what)| (t.id, *what) == (felled.0, felled.1)).or_else(|| wanted.iter().find(|(t, what)| t.id == felled.0 && felled.1 == 0 && *what == 1 && !have.contains(&(t.id, 1))));
+        let still = wanted.iter().find(|(t, what)| (t.id, *what) == (felled.0, felled.1)).or_else(|| wanted.iter().find(|(t, what)| t.id == felled.0 && felled.1 == 0 && *what == 1 && !have.contains(&(t.id, 1)))).or_else(|| wanted.iter().find(|(t, what)| t.id == felled.0 && felled.1 >= 3 && *what >= 3 && !have.contains(&(t.id, *what))));
         match still {
             Some((tree, _)) => (*at, *seen) = (place(tree, felled.1), shown(tree)),
             None => commands.entity(entity).despawn(),
@@ -69,40 +75,10 @@ fn felled(mut commands: Commands, live: Option<Res<Live>>, look: Option<Res<crat
             }
             Some(None) => {}
             None => {
-                let (form, land, origin) = (if *what == 2 { tree.stumped() } else { tree.form() }, terrain.1.clone(), tree.limbs[0].a);
-                making.insert(key, bevy::tasks::AsyncComputeTaskPool::get().spawn(async move { crate::flora::alone(&form, &land, origin) }));
+                let (form, land, origin) = (match *what { 2 => tree.stumped(), 0 | 1 => tree.form(), _ => tree.band() }, terrain.1.clone(), tree.limbs[0].a);
+                let cut = notch(tree).filter(|_| *what >= 3);
+                making.insert(key, bevy::tasks::AsyncComputeTaskPool::get().spawn(async move { crate::flora::alone(&form, &land, origin, cut) }));
             }
-        }
-    }
-}
-
-/// The notch in a tree an axe is at: whose, and how deep it was when this was drawn.
-#[derive(Component)]
-struct Notch(u32, f32);
-
-/// A standing tree's notch, drawn on it: a wedge of pale cut wood let into its trunk on the
-/// side the blows come from, a blow deeper each time, with the dark of the cut over and
-/// under it. The tree itself is still drawn as the tree (`felled`), which shows no cut.
-fn notched(mut commands: Commands, live: Option<Res<Live>>, drawn: Query<(Entity, &Notch)>, mut meshes: ResMut<Assets<Mesh>>, mut paints: ResMut<Assets<StandardMaterial>>, mut paint: Local<Option<[Handle<StandardMaterial>; 2]>>) {
-    let Some(live) = live else { return };
-    let cut = |t: &cube_sim::loose::Thing| t.notch.filter(|_| !t.felled && !t.cells);
-    for (entity, notch) in &drawn {
-        if !live.0.loose.things.iter().any(|t| t.id == notch.0 && cut(t).is_some_and(|n| n.3 == notch.1)) {
-            commands.entity(entity).despawn();
-        }
-    }
-    let [pale, dark] = paint.get_or_insert_with(|| [Color::srgb(0.78, 0.62, 0.40), Color::srgb(0.10, 0.07, 0.05)].map(|c| paints.add(StandardMaterial { base_color: c, perceptual_roughness: 0.95, ..default() }))).clone();
-    for tree in &live.0.loose.things {
-        let Some((middle, into, thick, deep)) = cut(tree) else { continue };
-        if drawn.iter().any(|(_, n)| n.0 == tree.id && n.1 == deep) {
-            continue;
-        }
-        // (Standing a little proud of the bark, which swells and furrows: sunk flush it was hidden.)
-        let turn = Quat::from_rotation_arc(Vec3::Z, into);
-        let face = middle - into * (thick * 1.25 - deep / 2.0);
-        commands.spawn((Notch(tree.id, deep), Mesh3d(meshes.add(Cuboid::new(thick * 1.7, 0.22, deep + thick * 0.3))), MeshMaterial3d(pale.clone()), Transform { translation: face, rotation: turn, scale: Vec3::ONE }));
-        for up in [-1.0f32, 1.0] {
-            commands.spawn((Notch(tree.id, deep), Mesh3d(meshes.add(Cuboid::new(thick * 1.8, 0.05, deep + thick * 0.34))), MeshMaterial3d(dark.clone()), Transform { translation: face + Vec3::Y * up * 0.135, rotation: turn, scale: Vec3::ONE }));
         }
     }
 }
@@ -287,7 +263,8 @@ fn told(mut commands: Commands, live: Option<ResMut<Live>>, bank: Option<ResMut<
     loose.shed.clear();
     for (at, cells, over) in loose.begun.drain(..) {
         if over && cells > 200 {
-            bank.play(&mut commands, "crack", Some(at), 1.0);
+            let from = bank.carried(at);
+            bank.play(&mut commands, "crack", Some(from), 1.0);
         }
     }
     for landed in loose.heard.drain(..) {
@@ -305,11 +282,13 @@ fn told(mut commands: Commands, live: Option<ResMut<Live>>, bank: Option<ResMut<
         // (The crash is a tree's: its trunk striking and its branches breaking. A log of
         // half a tonne played it too, three times as a trunk was bucked.)
         if landed.along.is_some() {
-            bank.play(&mut commands, "crash", Some(landed.at), loud);
+            let from = bank.carried(landed.at);
+            bank.play(&mut commands, "crash", Some(from), loud);
         } else if now - *clattered > 0.12 {
             *clattered = now;
             // (Wood come down is a knock, stone a clatter; lower the bigger it is.)
-            bank.pitched(&mut commands, if landed.wood { "thud" } else { "rubble" }, Some(landed.at), loud * if landed.wood { 0.9 } else { 0.6 }, (1.6 - size * 0.5).clamp(0.8, 1.5));
+            let from = bank.carried(landed.at);
+            bank.pitched(&mut commands, if landed.wood { "thud" } else { "rubble" }, Some(from), loud * if landed.wood { 0.9 } else { 0.6 }, (1.6 - size * 0.5).clamp(0.8, 1.5));
         }
         throw(&mut commands, landed.at.with_y(landed.at.y - size * 0.3), Block::Dirt, (6.0 + size * 10.0).min(40.0) as usize, size.max(0.5), 2.5);
     }

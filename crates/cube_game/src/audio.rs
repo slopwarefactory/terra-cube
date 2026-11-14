@@ -118,11 +118,19 @@ impl Bank {
         self.pitched(commands, name, at, volume, 1.0);
     }
 
+    /// Where a big sound is played from: on the way to where it was made, four tenths as far.
+    /// A tree's top strikes the ground ten metres from whoever felled it, and by the
+    /// engine's fall with distance its crash was a third as loud as the axe had been: "it
+    /// doesnt have any ground contact noises", the developer, 2026-11-14.
+    pub fn carried(&self, at: Vec3) -> Vec3 {
+        self.ear + (at - self.ear) * 0.4
+    }
+
     /// The same, played higher or lower: `pitch` times as fast.
     pub fn pitched(&mut self, commands: &mut Commands, name: &str, at: Option<Vec3>, volume: f32, pitch: f32) {
         let kind = if name.starts_with("step_") || name == "splash" || name == "swim" {
             Kind::Step
-        } else if ["swing", "hit", "hurt", "torch_ignite", "chop", "split", "dig", "pick"].contains(&name) || name.starts_with("ui_") {
+        } else if ["swing", "hit", "hurt", "torch_ignite", "chop", "split", "dig", "pick", "crash", "thud", "rubble", "crack"].contains(&name) || name.starts_with("ui_") {
             Kind::Hand
         } else {
             Kind::Voice
