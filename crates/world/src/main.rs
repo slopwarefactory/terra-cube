@@ -1438,6 +1438,26 @@ fn main() {
             // The nearest places to the start of a kind: `deep` water to swim in, or a biome.
             let what = args.file.clone().unwrap_or_default();
             let land = Land::new(args.seed, args.radius);
+            // (`boulder`: the stones over a metre and a half across nearest the start, as the land grows them.)
+            if what == "boulder" {
+                let (mut world, r) = (World::default(), cube_sim::terrain::REGION);
+                let ((), form) = cube_sim::plants::recorded(|| {
+                    for rz in -3..3 {
+                        for rx in -3..3 {
+                            cube_sim::terrain::fill(&mut world, &land, (rx * r, rz * r), ((rx + 1) * r, (rz + 1) * r));
+                        }
+                    }
+                });
+                let mut stones: Vec<_> = form.stones.iter().filter(|s| s.radii.min_element() > 0.7).collect();
+                stones.sort_by(|a, b| a.middle.length().total_cmp(&b.middle.length()));
+                for s in stones.iter().take(3) {
+                    println!("boulder at {:.0},{:.0} · {:.1} by {:.1} by {:.1} m · its middle {:.1},{:.1},{:.1}", s.middle.x, s.middle.z, s.radii.x * 2.0, s.radii.y * 2.0, s.radii.z * 2.0, s.middle.x, s.middle.y, s.middle.z);
+                }
+                if stones.is_empty() {
+                    fail("no boulder near the start");
+                }
+                std::process::exit(0);
+            }
             let mut found = Vec::new();
             for ring in 1..(land.span as f32 * CELL / 4.0) as i32 {
                 for turn in 0..128 {
@@ -1466,7 +1486,7 @@ fn main() {
                 }
             }
             if found.is_empty() {
-                fail(&format!("no `{what}` on this island (deep, trail, slope, or one of water shore meadow forest rock snow)"));
+                fail(&format!("no `{what}` on this island (deep, trail, slope, boulder, or one of water shore meadow forest rock snow)"));
             }
             for (x, z, depth) in found {
                 println!("{what} at {x:.0},{z:.0} · {:.0}m from the start{}", x.hypot(z), if depth <= -100.0 { format!(" · up it is --yaw {:.2}", -depth - 100.0) } else if depth > 0.0 { format!(" · {depth:.1}m of water") } else { String::new() });
