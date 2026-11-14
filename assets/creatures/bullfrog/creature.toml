@@ -2,7 +2,7 @@ name = "Bullfrog"
 kind = "wildlife"
 plan = "walked"
 subject = "a fat green bullfrog with a pale yellow throat and long folded hind legs"
-height = 0.15
+height = 0.12
 # It goes by hopping, as a frog does: walked like a dog its legs hardly stirred (seen 2026-11-13).
 hops = true
 without = ["sprint"]

@@ -1,8 +1,8 @@
-name = "Bog toad"
-kind = "monster"
+name = "Toad"
+kind = "wildlife"
 plan = "walked"
-subject = "a monstrous warty toad with a huge wide mouth, bulging orange eyes and a slimy olive hide"
-height = 0.9
+subject = "a warty toad with a wide mouth, orange eyes and an olive hide"
+height = 0.12
 without = ["sprint"]
 # (Its stride at three fifths of full: at three tenths, as it was, its legs hardly stirred:
 # `legs swing` in the check, 2026-11-13.)
@@ -11,7 +11,7 @@ hops = true
 rests = "stands"
 
 [life]
-temper = "hostile"
+temper = "timid"
 share = 0.4
 voice = "toad"
 habitat = "shore"
