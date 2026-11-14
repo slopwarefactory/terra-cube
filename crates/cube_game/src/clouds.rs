@@ -340,8 +340,12 @@ fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials
 /// The field goes downwind and stays round the camera. A cloud's foot is highest overhead
 /// and comes down toward the field's edge, where the cloud has dwindled to nothing; near
 /// ones are drawn in their fine cubes.
-fn drift(time: Res<Time>, kinds: Res<Kinds>, cameras: Query<&GlobalTransform, With<Camera3d>>, mut clouds: Query<(&Cloud, &mut Transform, &mut Mesh3d)>, mut turn: Local<usize>) {
+fn drift(time: Res<Time>, live: Option<Res<crate::motion::Live>>, kinds: Res<Kinds>, cameras: Query<&GlobalTransform, With<Camera3d>>, mut clouds: Query<(&Cloud, &mut Transform, &mut Mesh3d)>, mut turn: Local<usize>) {
     let Some(eye) = cameras.iter().next().map(|c| c.translation()) else { return };
+    // The weather (`sky::cloud`): on a clear day the clouds are small and far between, and
+    // under an overcast they have grown into each other. They are the same clouds, each as
+    // big as the sky is clouded: the field does not change, so nothing is made or lost.
+    let weather = 0.55 + 1.0 * crate::world::overcast(live.map_or(cube_sim::sky::START, |l| l.0.when));
     // An eighth of them each frame: a cloud goes 5 m in a second half a kilometre off, and
     // moved eight times a second it is not seen to step; moved every frame, a thousand of
     // them are a thousand things changed for the engine to carry to the picture.
@@ -361,7 +365,7 @@ fn drift(time: Res<Time>, kinds: Res<Kinds>, cameras: Query<&GlobalTransform, Wi
         let (size, lift, long, thin) = if cloud.1 < 0.0 { (-cloud.1, 2.2, 1.7, 0.3) } else { (cloud.1, 1.0, 1.0, 1.0) };
         at.translation = Vec3::new(eye.x + dx, sea + (FOOT - (FOOT - EDGE_FOOT) * out * out) * lift, eye.z + dz);
         // (Never quite nothing: a size of nought has no way back.)
-        let size = (size * fade * fade * (3.0 - 2.0 * fade)).max(1e-4);
+        let size = (size * weather * fade * fade * (3.0 - 2.0 * fade)).max(1e-4);
         at.scale = Vec3::new(size * long, size * thin, size);
         let want = if far < NEAR { &kinds.0[cloud.2].0 } else { &kinds.0[cloud.2].1 };
         if mesh.0 != *want {
