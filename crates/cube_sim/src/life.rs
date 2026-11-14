@@ -105,6 +105,9 @@ pub struct Life {
     /// out of its hours, and under the ground it is neither seen nor reached.
     #[serde(default)]
     pub den: bool,
+    /// Out of its hours it flies up to roost on a bough near where it lives (a bird).
+    #[serde(default)]
+    pub roost: bool,
 }
 
 /// What a creature eats.
@@ -230,6 +233,8 @@ pub struct Kind {
     pub flies: bool,
     /// It keeps a den where it lives ([`Agent::under`]).
     pub den: bool,
+    /// Out of its hours it roosts on a bough (`Mind::perch`).
+    pub roosts: bool,
 }
 
 impl Kind {
@@ -357,7 +362,7 @@ impl Kind {
                 }
             };
             // With no [life], a player is a person and anything else just stands its ground.
-            let life = spec.life.unwrap_or(Life { temper: if spec.kind == "player" { Temper::Person } else { Temper::Wary }, habitat: None, group: 1, groups: 0, water: Default::default(), cover: Default::default(), hours: Default::default(), winter: 1.0, voice: None, diet: None, litter: None, lifespan: None, capacity: None, range: None, meal: None, holds: None, share: 1.0, flies: false, den: false });
+            let life = spec.life.unwrap_or(Life { temper: if spec.kind == "player" { Temper::Person } else { Temper::Wary }, habitat: None, group: 1, groups: 0, water: Default::default(), cover: Default::default(), hours: Default::default(), winter: 1.0, voice: None, diet: None, litter: None, lifespan: None, capacity: None, range: None, meal: None, holds: None, share: 1.0, flies: false, den: false, roost: false });
             let diet = life.diet.unwrap_or(match life.temper {
                 Temper::Hunter | Temper::Hostile => Diet::Meat,
                 Temper::Person => Diet::All,
@@ -402,6 +407,7 @@ impl Kind {
                 share: life.share,
                 flies: life.flies,
                 den: life.den,
+                roosts: life.roost,
             });
         }
         kinds
@@ -638,6 +644,44 @@ pub struct Sim {
 /// The size of a piece of grazing, metres; what a grazer a metre tall eats of one in a day
 /// (by its height squared: a moose eats forty rabbits' worth); and how lean the grazing is
 /// when what feeds on it begins to starve and to rear fewer young.
+/// How far from where it lives a bird will go to roost, metres. (Within seven, no crow or
+/// pheasant on the island had a tree: they live in the open.)
+const ROOST: f32 = 24.0;
+
+/// Somewhere to roost near a place: the top of the nearest wood that stands two and a half
+/// metres and more over the ground within [`ROOST`], with room over it to sit in.
+fn perch(world: &World, home: Vec2) -> Option<Vec3> {
+    let ground = world.ground_height(home.x, home.y);
+    let mut best: Option<(f32, Vec3)> = None;
+    for dz in -ROOST as i32..=ROOST as i32 {
+        for dx in -ROOST as i32..=ROOST as i32 {
+            let (x, z) = (home.x + dx as f32, home.y + dz as f32);
+            let far = Vec2::new(dx as f32, dz as f32).length();
+            if far > ROOST || best.is_some_and(|b| b.0 <= far) {
+                continue;
+            }
+            // (Down from well over the trees to the first wood with room over it.)
+            let column = |y: i32| glam::IVec3::new((x / CELL).floor() as i32, y, (z / CELL).floor() as i32);
+            let (low, high) = (((ground + 2.5) / CELL).ceil() as i32, ((ground + 14.0) / CELL).ceil() as i32);
+            // (Wood in whole cells or in bits, which a thin bough is; and leaf over it is room: a
+            // body goes through leaf. Asked for whole cells under open air, no bird on the
+            // island found one.)
+            let wood = |c: glam::IVec3| match world.get(c) {
+                cube_voxel::Block::Broken => world.bits_at(c).is_some_and(|bits| bits.iter().filter(|b| b.wood()).count() >= 25),
+                b => b.wood(),
+            };
+            let room = |c: glam::IVec3| { let b = world.get(c); !b.solid() || b.foliage() };
+            // (A metre and a half of room: it comes in a metre over it, and is some way high itself.)
+            if let Some(y) = (low..high).rev().find(|y| wood(column(*y)) && (1..=6).all(|up| room(column(*y + up)))) {
+                // (The middle of that cell: at its edge a bird came down beside it.)
+                let c = column(y);
+                best = Some((far, Vec3::new((c.x as f32 + 0.5) * CELL, (y + 1) as f32 * CELL, (c.z as f32 + 0.5) * CELL)));
+            }
+        }
+    }
+    best.map(|b| b.1)
+}
+
 /// The least a creature's box is across from its middle, metres: one bit of the ground.
 const SLIGHT: f32 = 0.05;
 pub const PASTURE: f32 = 64.0;
@@ -1110,7 +1154,42 @@ impl Sim {
             // be in the air.
             if self.kinds[agent.kind].flies && agent.driver == Driver::Mind && agent.dead.is_none() && !agent.body.swimming {
                 let fled = agent.mind.state == mind::State::Flee;
-                if fled || !agent.body.grounded {
+                // Out of its hours a bird that roosts goes up to a bough near where it lives
+                // and sits there, off the ground: looked for once, the first time it wants one.
+                // (Every bird lay up for the night on the ground it fed on.)
+                let roosting = self.kinds[agent.kind].roosts && !fled && agent.mind.about < 0.3;
+                if roosting && agent.mind.perch.is_none() {
+                    agent.mind.perch = Some(perch(world, agent.mind.home));
+                }
+                let to = agent.mind.perch.flatten().filter(|_| roosting);
+                let on_it = to.is_some_and(|p| agent.body.grounded && agent.body.pos.y > p.y - 0.4 && agent.body.pos.with_y(0.0).distance(p.with_y(0.0)) < 1.2);
+                // (A bough it cannot get onto in half a minute, for the wood round it, is no
+                // roost: it gives it up and lies up on the ground. Three crows of six hung in
+                // the air at theirs all night.)
+                agent.mind.trying = if to.is_some() && !on_it { agent.mind.trying + DT } else { 0.0 };
+                if agent.mind.trying > 30.0 {
+                    (agent.mind.perch, agent.mind.trying) = (Some(None), 0.0);
+                }
+                let to = to.filter(|_| agent.mind.perch.flatten().is_some());
+                if let Some(p) = to.filter(|_| !on_it) {
+                    let off = Vec2::new(p.x - agent.body.pos.x, p.z - agent.body.pos.z);
+                    // (Up to over it, across, and down onto it.)
+                    // (Up first, short of it: gone straight at it, it came in under the bough
+                    // and sat on the ground beneath.)
+                    let high = agent.body.pos.y > p.y + 0.5;
+                    let over = off.length() <= 0.3 && agent.body.pos.y > p.y;
+                    intent.lift = Some(if over { -1.2 } else { ((p.y + 1.0 - agent.body.pos.y) * 1.5).clamp(-1.5, 3.0) });
+                    (intent.dir, intent.speed) = (if high || over || off.length() > 2.0 { off.clamp_length_max(1.0) } else { Vec2::ZERO }, WING * 0.7);
+                } else if on_it {
+                    // (And sits: no wandering off the bough till its hours come round.)
+                    (intent.dir, intent.jump) = (Vec2::ZERO, false);
+                } else if let Some(p) = agent.mind.perch.flatten().filter(|p| !roosting && !fled && agent.body.grounded && agent.body.pos.y > p.y - 0.4 && agent.body.pos.with_y(0.0).distance(p.with_y(0.0)) < 3.0) {
+                    // Its hours come round, it leaves the bough for where it lives: off it
+                    // into the air, and then down at a glide as any bird comes down. (A
+                    // mind does not walk off a drop: it stayed up there all day.)
+                    let home = agent.mind.home - Vec2::new(p.x, p.z);
+                    (intent.lift, intent.dir, intent.speed) = (Some(1.0), home.normalize_or(Vec2::X), WING * 0.7);
+                } else if fled || !agent.body.grounded {
                     let from = agent.body.pos + Vec3::Y * 0.1;
                     let over = world.raycast(from, Vec3::NEG_Y, FLIES * 2.0).unwrap_or(FLIES * 2.0);
                     // (It does not come down on water: it flew out over the sea from the
@@ -1609,7 +1688,7 @@ mod tests {
     use cube_voxel::Block;
 
     fn kind(id: &str, temper: Temper, height: f32, speeds: [f32; 3]) -> Kind {
-        Kind { id: id.into(), parts: Vec::new(), feeding: Vec::new(), lying: Vec::new(), height, length: height * 0.8, width: height * 0.4, walk: speeds[0], run: speeds[1], sprint: speeds[2], temper, habitat: Biome::Meadow, group: 2, groups: 3, water: Default::default(), cover: Default::default(), hours: Default::default(), voice: None, winter: 1.0, diet: if matches!(temper, Temper::Hunter | Temper::Hostile) { Diet::Meat } else { Diet::Plants }, litter: 2.0, lifespan: 8.0, capacity: 8, range: 80.0, meal: 6.0, holds: None, share: 1.0, flies: false, den: false }
+        Kind { id: id.into(), parts: Vec::new(), feeding: Vec::new(), lying: Vec::new(), height, length: height * 0.8, width: height * 0.4, walk: speeds[0], run: speeds[1], sprint: speeds[2], temper, habitat: Biome::Meadow, group: 2, groups: 3, water: Default::default(), cover: Default::default(), hours: Default::default(), voice: None, winter: 1.0, diet: if matches!(temper, Temper::Hunter | Temper::Hostile) { Diet::Meat } else { Diet::Plants }, litter: 2.0, lifespan: 8.0, capacity: 8, range: 80.0, meal: 6.0, holds: None, share: 1.0, flies: false, den: false, roosts: false }
     }
 
     /// Rabbit, wolf, bear, goblin and a person, on a floor of stone 60 m square.
@@ -1836,6 +1915,30 @@ mod tests {
             up += sim.agents.get(&rabbit).is_some_and(|r| r.under <= 0.0) as u32;
         }
         assert!(up > 0, "in a minute it never came up");
+    }
+
+    #[test]
+    fn a_bird_that_roosts_goes_up_onto_a_bough_for_the_night_and_comes_down_by_day() {
+        let (mut world, mut sim) = stage();
+        // A trunk with a bough out from it four metres up, five metres from where a bird lives.
+        world.fill(at(5.0, 0.0), at(5.5, 0.0) + Vec3::new(0.0, 4.0, 0.5), Block::Wood);
+        world.fill(at(4.0, -0.5) + Vec3::Y * 3.75, at(6.5, 1.0) + Vec3::Y * 4.0, Block::Wood);
+        (sim.kinds[0].flies, sim.kinds[0].roosts, sim.kinds[0].hours) = (true, true, crate::ecology::Hours::Day);
+        let bird = sim.add(&world, 0, at(0.0, 0.0), 0.0, Driver::Mind);
+        let ground = sim.agents[&bird].body.pos.y;
+        // One in the morning: out of its hours.
+        sim.when = crate::sky::at(10, 1.0);
+        run(&mut sim, &world, 40.0);
+        let b = &sim.agents[&bird];
+        assert!(b.body.grounded && b.body.pos.y > ground + 3.5, "at night it is {:.1} m up, on the ground {}: perch {:?}", b.body.pos.y - ground, b.body.grounded, b.mind.perch);
+        // Noon: it comes down and is about on the ground again.
+        sim.when = crate::sky::at(10, 12.0);
+        let mut down = false;
+        for _ in 0..(120.0 / DT) as usize {
+            sim.step(&world);
+            down |= sim.agents[&bird].body.grounded && sim.agents[&bird].body.pos.y < ground + 0.5;
+        }
+        assert!(down, "by day it never came down: {:.1} m up", sim.agents[&bird].body.pos.y - ground);
     }
 
     #[test]

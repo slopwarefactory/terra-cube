@@ -18,6 +18,8 @@ wing = [0.02, 0.02, 0.03]
 mark = [0.07, 0.07, 0.07]
 
 [life]
+# Out of its hours it goes up to roost on a bough.
+roost = true
 temper = "timid"
 # Goes up from what frightens it and glides down after (`Sim::step`).
 flies = true

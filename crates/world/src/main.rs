@@ -252,6 +252,14 @@ fn run_command(args: &Args) -> ! {
         let (inside, fell) = (sum(&|l| l.inside as f32), sum(&|l| l.fell as f32));
         println!("{} ×{}: went {:.0}m each · {} · fled {} · hit {} · drank {} · set out {} · hunts {}", kind.id, of.len(), moved, acts.join(" "), sum(&|l| l.fled as f32), sum(&|l| l.struck as f32), sum(&|l| l.drank as f32), sum(&|l| l.trips as f32), sum(&|l| l.hunts as f32));
         checks.bar(&format!("{} inside-ground", kind.id), inside, inside == 0.0, "0 ticks");
+        // A kind that roosts, when the watch ends out of its hours: how many are up on
+        // something, and how many still in the air (which is none that has found its bough).
+        if kind.roosts && of.iter().any(|a| a.mind.about < 0.3) {
+            let high = |a: &&cube_sim::life::Agent| a.body.pos.y - land.height((a.body.pos.x / CELL).floor() as i32, (a.body.pos.z / CELL).floor() as i32) as f32 * CELL > 2.0;
+            let (up, flying, with) = (of.iter().filter(|a| a.body.grounded && high(a)).count(), of.iter().filter(|a| !a.body.grounded && a.mind.perch.flatten().is_some() && a.mind.state != cube_sim::mind::State::Flee).count(), of.iter().filter(|a| a.mind.perch.flatten().is_some()).count());
+            println!("  {} out of its hours: {up} of {} up on a bough, {flying} in the air, {with} with a bough to go to", kind.id, of.len());
+            checks.bar(&format!("{} aloft", kind.id), flying as f32, flying * 4 <= of.len(), "no more than a quarter still in the air out of its hours");
+        }
         checks.bar(&format!("{} fell-out", kind.id), fell, fell == 0.0, "0 times");
         checks.bar(&format!("{} stuck", kind.id), stuck, stuck <= 0.08, "at most 0.08 of the time");
         checks.bar(&format!("{} boxed-in", kind.id), boxed, boxed <= 0.1, "at most 0.10 of the time");

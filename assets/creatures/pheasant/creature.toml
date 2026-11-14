@@ -18,6 +18,8 @@ wing = [0.4, 0.28, 0.14]
 mark = [0.6, 0.08, 0.06]
 
 [life]
+# Out of its hours it goes up to roost on a bough.
+roost = true
 temper = "timid"
 voice = "pheasant"
 # Goes up from what frightens it and glides down after (`Sim::step`).

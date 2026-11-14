@@ -18,6 +18,8 @@ wing = [0.3, 0.2, 0.12]
 mark = [0.8, 0.45, 0.1]
 
 [life]
+# Out of its hours it goes up to roost on a bough.
+roost = true
 temper = "hunter"
 voice = "owl"
 # Goes up from what frightens it and glides down after (`Sim::step`).

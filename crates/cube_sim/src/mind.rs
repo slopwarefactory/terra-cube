@@ -50,6 +50,11 @@ pub struct Mind {
     hit_done: bool,
     /// How much it is about at this hour, 0 to 1 (its niche's hours): set each tick.
     pub about: f32,
+    /// Where it roosts, once it has looked for somewhere (a kind that roosts, `Kind::roosts`):
+    /// the top of a bough near where it lives, or nowhere if there is none.
+    pub perch: Option<Option<glam::Vec3>>,
+    /// Seconds it has been trying to get onto its perch.
+    pub trying: f32,
     /// It is going to water to drink, and drinks when it gets there.
     pub to_water: bool,
     /// It is grazing its way along: at the end of this walk it grazes again.
@@ -63,7 +68,7 @@ pub struct Mind {
 
 impl Mind {
     pub fn new(home: Vec2, rng: &mut Rng) -> Self {
-        Self { state: State::Rest, left: rng.between(0.0, 4.0), home, goal: home, target: None, tired: 0.0, veer: if rng.chance(0.5) { 1.0 } else { -1.0 }, mark: home, since_mark: 0.0, hit_done: false, about: 1.0 , to_water: false, bout: false, still: 0.0, easy: false}
+        Self { state: State::Rest, left: rng.between(0.0, 4.0), home, goal: home, target: None, tired: 0.0, veer: if rng.chance(0.5) { 1.0 } else { -1.0 }, mark: home, since_mark: 0.0, hit_done: false, about: 1.0, perch: None, trying: 0.0, to_water: false, bout: false, still: 0.0, easy: false}
     }
 }
 
