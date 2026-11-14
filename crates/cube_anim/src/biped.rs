@@ -91,6 +91,13 @@ pub struct Biped {
     lean: f32,
     /// How high the hips are carried.
     high: f32,
+    /// How high the hips are carried, and how fast that is changing: it comes to `high` as
+    /// on a spring. `high` is cut at a stroke to what a leg can reach the moment its foot is
+    /// down, and creeps back up after: carried at `high` itself the hips dropped at every
+    /// footfall, 2.4 m/s at a walk where a person's own walk is 0.5 (`trunk` in a scene's
+    /// lines), which is what stiff looked like.
+    carried: f32,
+    carrying: f32,
     /// A foot being brought back under it as it stands, and how far through that it is.
     shuffle: Option<(usize, f32)>,
     /// How much it is in the air, 0 to 1, and how much of that is rising (1) or falling (0);
@@ -122,7 +129,7 @@ impl Biped {
             let p = at + turn * Vec3::X * side * frame.hips / 2.0;
             Foot { at: p, yaw, pitch: 0.0, down: true, from: p, clear: 0.0 }
         });
-        Self { frame, at, yaw, vel: Vec3::ZERO, phase: 0.0, feet, runs: 0.0, goes: 0.0, lean: 0.0, high: frame.stands(), shuffle: None, air: 0.0, rises: 0.0, dip: 0.0, dipping: 0.0, aloft: false, strikes: false, lunge: 0.0, time: 0.0, steps: [0; 2] }
+        Self { frame, at, yaw, vel: Vec3::ZERO, phase: 0.0, feet, runs: 0.0, goes: 0.0, lean: 0.0, high: frame.stands(), carried: frame.stands(), carrying: 0.0, shuffle: None, air: 0.0, rises: 0.0, dip: 0.0, dipping: 0.0, aloft: false, strikes: false, lunge: 0.0, time: 0.0, steps: [0; 2] }
     }
 
     /// Whether each foot is on the ground.
@@ -186,6 +193,7 @@ impl Biped {
             self.shuffle = None;
             self.lean += (0.1 * up - 0.04 - self.lean) * ease(5.0);
             self.high += (hips - self.high) * ease(30.0);
+            self.carry(dt);
             return;
         }
         self.runs += (smooth((speed / size - 1.8) / 0.9) - self.runs) * ease(8.0);
@@ -310,7 +318,10 @@ impl Biped {
         let bound = -(2.0 * TAU * (self.phase - duty / 2.0)).cos() * 0.035 * leg * r;
         let want = floor + f.stands() - 0.05 * leg * r + bound - self.dip - 0.07 * leg * self.lunge * (1.0 - self.goes);
         self.high += (want - self.high) * ease(18.0);
+        // (What the legs reach is asked of the hips at `high`, not where they are carried.)
+        let carried = std::mem::replace(&mut self.carried, self.high);
         let stance = self.stance();
+        self.carried = carried;
         let over = (0..2)
             .map(|i| {
                 let (hip, foot) = (stance.legs[i][0], &self.feet[i]);
@@ -321,6 +332,22 @@ impl Biped {
             })
             .fold(0.0f32, f32::max);
         self.high -= over.min(leg * 0.4);
+        self.carry(dt);
+    }
+
+    /// The hips come to where they are to be over a tenth of a second, neither at a stroke
+    /// nor past it (a critically damped spring); put somewhere else altogether, they are there.
+    fn carry(&mut self, dt: f32) {
+        if (self.high - self.carried).abs() > 0.5 {
+            (self.carried, self.carrying) = (self.high, 0.0);
+            return;
+        }
+        let omega = 2.0 / 0.1;
+        let (x, change) = (omega * dt, self.carried - self.high);
+        let decay = 1.0 / (1.0 + x + 0.48 * x * x + 0.235 * x * x * x);
+        let temp = (self.carrying + omega * change) * dt;
+        self.carrying = (self.carrying - omega * temp) * decay;
+        self.carried = self.high + (change + temp) * decay;
     }
 
     /// Where a foot's ankle is: over its place when flat; tipped, it turns on the ball of the
@@ -347,7 +374,7 @@ impl Biped {
         // Standing, it breathes and its weight drifts from one foot to the other.
         let still = (1.0 - goes) * (1.0 - self.air);
         let (breath, drift) = ((self.time * 1.6).sin() * still, (self.time * 0.43).sin() * still);
-        let middle = Vec3::new(self.at.x, self.high, self.at.z) - turn * Vec3::X * ((0.022 * (1.0 - r) + 0.008) * goes * over + 0.014 * drift);
+        let middle = Vec3::new(self.at.x, self.carried, self.at.z) - turn * Vec3::X * ((0.022 * (1.0 - r) + 0.008) * goes * over + 0.014 * drift);
         // The shoulders turn against the hips, on a back that leans; the head stays level.
         let chest = turn * Quat::from_rotation_y(-twist * 0.9) * Quat::from_rotation_z(0.02 * drift) * Quat::from_rotation_x(self.lean - 0.012 * breath);
         let shoulders = middle + turn * Quat::from_rotation_x(self.lean * 0.7) * Vec3::Y * f.torso;

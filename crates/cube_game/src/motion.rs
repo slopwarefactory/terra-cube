@@ -249,7 +249,8 @@ fn show(time: Res<Time>, fixed: Res<Time<Fixed>>, registry: Res<Registry>, terra
             let front = going.normalize_or_zero() * agent.body.half;
             let rise = [0.4, 1.0].into_iter().filter_map(|part| terrain.as_ref().and_then(|t| crate::feet::ground_at(t, at.x + front.x + going.x * AHEAD * part, at.z + front.z + going.z * AHEAD * part, at.y))).map(|g| (g - at.y).clamp(0.0, 0.5)).fold(0.0, f32::max);
             let (y, want) = (at.y, at.y + rise);
-            let was = m.shown.unwrap_or(want);
+            // (Come down from the air it is where its body is, and rises from there.)
+            let was = m.shown.unwrap_or(y);
             // (A spring that neither overshoots nor starts at a stroke: critically damped.)
             let omega = 2.0 / if want > was { 0.11 } else { 0.16 };
             let (x, change) = (omega * dt, was - want);
