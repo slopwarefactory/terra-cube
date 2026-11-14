@@ -32,5 +32,7 @@ range = 260.0
 capacity = 4
 # A lair rears one a year when it has fed and has room: at a hostile thing's 0.4 six lairs
 # reared one in 24 years and died of age down to one (`cargo world years 24`).
-litter = 1.0
+# (0.8 since 2026-11-14: with the toad an ordinary toad there is more for a lair to eat, and
+# at 1.0 they went from 6 to 20 in 24 years and did not settle.)
+litter = 0.8
 groups = 1
