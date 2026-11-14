@@ -572,7 +572,9 @@ pub fn think(id: u32, agent: &mut Agent, kind: &Kind, seen: &[Seen], world: &Wor
             }
         },
         State::Chase => match target {
-            Some(t) if m.left > 0.0 && gap_to(t) < 30.0 => {
+            // (Nor is what has gone up to roost chased: a fox stood under a pheasant's tree
+            // with no way on, a third of its time. What flies off low is still run after.)
+            Some(t) if m.left > 0.0 && gap_to(t) < 30.0 && t.pos.y - agent.body.pos.y < kind.height + 2.5 => {
                 let gap = gap_to(t);
                 // (What has gone up out of reach is not struck at: a bird on the wing.)
                 let reached = t.pos.y - agent.body.pos.y < kind.height + 0.8;

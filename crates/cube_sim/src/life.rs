@@ -660,9 +660,11 @@ fn perch(world: &World, home: Vec2) -> Option<Vec3> {
             if far > ROOST || best.is_some_and(|b| b.0 <= far) {
                 continue;
             }
-            // (Down from well over the trees to the first wood with room over it.)
+            // (Up from two and a half metres to the first wood with room over it, no higher
+            // than eight: the lowest bough. Down from over the trees to the first, a crow
+            // was sent to the top of a tree of twenty metres and was caught under its crown.)
             let column = |y: i32| glam::IVec3::new((x / CELL).floor() as i32, y, (z / CELL).floor() as i32);
-            let (low, high) = (((ground + 2.5) / CELL).ceil() as i32, ((ground + 14.0) / CELL).ceil() as i32);
+            let (low, high) = (((ground + 2.5) / CELL).ceil() as i32, ((ground + 8.0) / CELL).ceil() as i32);
             // (Wood in whole cells or in bits, which a thin bough is; and leaf over it is room: a
             // body goes through leaf. Asked for whole cells under open air, no bird on the
             // island found one.)
@@ -672,10 +674,23 @@ fn perch(world: &World, home: Vec2) -> Option<Vec3> {
             };
             let room = |c: glam::IVec3| { let b = world.get(c); !b.solid() || b.foliage() };
             // (A metre and a half of room: it comes in a metre over it, and is some way high itself.)
-            if let Some(y) = (low..high).rev().find(|y| wood(column(*y)) && (1..=6).all(|up| room(column(*y + up)))) {
-                // (The middle of that cell: at its edge a bird came down beside it.)
+            if let Some(y) = (low..high).find(|y| wood(column(*y)) && (1..=6).all(|up| room(column(*y + up)))) {
+                // (The middle of that cell, or of the wood in it where it is bits: at a
+                // cell's edge a bird came down beside it, and over a thin bough's cell but not
+                // over its wood it hung there with nothing under it.)
                 let c = column(y);
-                best = Some((far, Vec3::new((c.x as f32 + 0.5) * CELL, (y + 1) as f32 * CELL, (c.z as f32 + 0.5) * CELL)));
+                let middle = Vec3::new((c.x as f32 + 0.5) * CELL, (y + 1) as f32 * CELL, (c.z as f32 + 0.5) * CELL);
+                let at = match world.bits_at(c).filter(|_| world.get(c) == cube_voxel::Block::Broken) {
+                    Some(bits) => {
+                        let n = cube_voxel::SPLIT;
+                        let of: Vec<Vec3> = (0..n * n * n).filter(|i| bits[*i as usize].wood()).map(|i| (c * n + glam::IVec3::new(i % n, i / (n * n), i / n % n)).as_vec3() * cube_voxel::BIT + cube_voxel::BIT / 2.0).collect();
+                        let top = of.iter().map(|p| p.y).fold(f32::MIN, f32::max);
+                        let over: Vec<Vec3> = of.iter().copied().filter(|p| p.y > top - 0.01).collect();
+                        (over.iter().sum::<Vec3>() / over.len().max(1) as f32).with_y(top + cube_voxel::BIT / 2.0)
+                    }
+                    None => middle,
+                };
+                best = Some((far, at));
             }
         }
     }
@@ -1168,6 +1183,12 @@ impl Sim {
                 // the air at theirs all night.)
                 agent.mind.trying = if to.is_some() && !on_it { agent.mind.trying + DT } else { 0.0 };
                 if agent.mind.trying > 30.0 {
+                    // (`ROOST_TRACE=1`: where it was and what was about it when it gave up.)
+                    if std::env::var_os("ROOST_TRACE").is_some() && let Some(p) = agent.mind.perch.flatten() {
+                        let at = agent.body.pos;
+                        let col = |x: f32, z: f32| (-2..=8).map(|dy| { let b = world.get(((Vec3::new(x, p.y + dy as f32 * CELL, z)) / CELL).floor().as_ivec3()); if !b.solid() { '.' } else if b.foliage() { 'l' } else if b == cube_voxel::Block::Broken { '#' } else { 'W' } }).collect::<String>();
+                        eprintln!("roost: {} gave up its bough at {p:.1?}: it is at {at:.1?} ({:.1} m off, {:.1} over it), grounded {}, half {:.2} tall {:.2}; from two cells under the bough up, at it {} and under the bird {}", self.kinds[agent.kind].id, at.with_y(0.0).distance(p.with_y(0.0)), at.y - p.y, agent.body.grounded, agent.body.half, agent.body.height, col(p.x, p.z), col(at.x, at.z));
+                    }
                     (agent.mind.perch, agent.mind.trying) = (Some(None), 0.0);
                 }
                 let to = to.filter(|_| agent.mind.perch.flatten().is_some());
@@ -1177,9 +1198,11 @@ impl Sim {
                     // (Up first, short of it: gone straight at it, it came in under the bough
                     // and sat on the ground beneath.)
                     let high = agent.body.pos.y > p.y + 0.5;
-                    let over = off.length() <= 0.3 && agent.body.pos.y > p.y;
+                    let over = off.length() <= 0.2 && agent.body.pos.y > p.y - 0.1;
                     intent.lift = Some(if over { -1.2 } else { ((p.y + 1.0 - agent.body.pos.y) * 1.5).clamp(-1.5, 3.0) });
-                    (intent.dir, intent.speed) = (if high || over || off.length() > 2.0 { off.clamp_length_max(1.0) } else { Vec2::ZERO }, WING * 0.7);
+                    // (Stopped going up by what is over it, it backs out from under.)
+                    let under = !high && !over && agent.mind.trying > 1.0 && agent.body.vel.y.abs() < 0.1;
+                    (intent.dir, intent.speed) = (if under { -off.normalize_or(Vec2::X) } else if high || over || off.length() > 2.0 { off.clamp_length_max(1.0) } else { Vec2::ZERO }, WING * 0.7);
                 } else if on_it {
                     // (And sits: no wandering off the bough till its hours come round.)
                     (intent.dir, intent.jump) = (Vec2::ZERO, false);

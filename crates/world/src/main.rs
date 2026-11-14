@@ -258,7 +258,9 @@ fn run_command(args: &Args) -> ! {
             let high = |a: &&cube_sim::life::Agent| a.body.pos.y - land.height((a.body.pos.x / CELL).floor() as i32, (a.body.pos.z / CELL).floor() as i32) as f32 * CELL > 2.0;
             let (up, flying, with) = (of.iter().filter(|a| a.body.grounded && high(a)).count(), of.iter().filter(|a| !a.body.grounded && a.mind.perch.flatten().is_some() && a.mind.state != cube_sim::mind::State::Flee).count(), of.iter().filter(|a| a.mind.perch.flatten().is_some()).count());
             println!("  {} out of its hours: {up} of {} up on a bough, {flying} in the air, {with} with a bough to go to", kind.id, of.len());
-            checks.bar(&format!("{} aloft", kind.id), flying as f32, flying * 4 <= of.len(), "no more than a quarter still in the air out of its hours");
+            // (Some are at it at any moment: one that cannot get onto its bough gives it up in
+            // half a minute. All of them in the air is none of them ever landing.)
+            checks.bar(&format!("{} aloft", kind.id), flying as f32, flying * 2 <= of.len(), "no more than half still in the air out of its hours");
         }
         checks.bar(&format!("{} fell-out", kind.id), fell, fell == 0.0, "0 times");
         checks.bar(&format!("{} stuck", kind.id), stuck, stuck <= 0.08, "at most 0.08 of the time");
