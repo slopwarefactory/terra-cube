@@ -209,10 +209,11 @@ pub(crate) fn tick(terrain: Option<ResMut<Terrain>>, loading: Res<crate::loading
 /// How far ahead of itself a creature going uphill makes for the ground, seconds.
 const AHEAD: f32 = 0.25;
 
-fn show(time: Res<Time>, fixed: Res<Time<Fixed>>, registry: Res<Registry>, terrain: Option<Res<Terrain>>, mut live: ResMut<Live>, mut movers: Query<(&mut Mover, &mut Creature, &mut Transform)>) {
+fn show(time: Res<Time>, fixed: Res<Time<Fixed>>, registry: Res<Registry>, terrain: Option<Res<Terrain>>, cameras: Query<&GlobalTransform, With<Camera3d>>, mut live: ResMut<Live>, mut movers: Query<(&mut Mover, &mut Creature, &mut Transform)>) {
     let _slow = crate::Slow::new("show");
     let dt = time.delta_secs();
     let between = fixed.overstep_fraction();
+    let eye = cameras.iter().next().map(|c| c.translation());
     let Sim { agents, kinds, when, .. } = &mut live.0;
     for (mut m, mut creature, mut transform) in &mut movers {
         let Some(agent) = agents.get_mut(&m.id) else { continue };
@@ -222,7 +223,8 @@ fn show(time: Res<Time>, fixed: Res<Time<Fixed>>, registry: Res<Registry>, terra
         // The model eases after a step so it does not pop, but never trails the body by more
         // than a few centimetres: on a climb the steps come sixteen a second, and an uncapped
         // lag put the feet a third of a metre inside the hill.
-        m.lift = ((m.lift - std::mem::take(&mut agent.stepped)) * (-22.0 * dt).exp()).clamp(-0.08, 0.08);
+        // (Over it by as much as it was when it left the ground, fading: see below.)
+        m.lift = ((m.lift - std::mem::take(&mut agent.stepped)) * (-22.0 * dt).exp()).clamp(-0.08, 0.5);
         transform.translation = agent.before.lerp(agent.body.pos, between) + Vec3::Y * m.lift;
         // The young are small: born at under half their size, grown by the time they breed.
         transform.scale = Vec3::splat((0.45 + 0.55 * (*when - agent.born) / cube_sim::sky::YEAR / kinds[agent.kind].maturity()).clamp(0.45, 1.0));
@@ -247,7 +249,10 @@ fn show(time: Res<Time>, fixed: Res<Time<Fixed>>, registry: Res<Registry>, terra
             // a third of a metre before its middle.)
             let going = (agent.body.pos - agent.before).with_y(0.0) * cube_sim::TICKS as f32;
             let front = going.normalize_or_zero() * agent.body.half;
-            let rise = [0.4, 1.0].into_iter().filter_map(|part| terrain.as_ref().and_then(|t| crate::feet::ground_at(t, at.x + front.x + going.x * AHEAD * part, at.z + front.z + going.z * AHEAD * part, at.y))).map(|g| (g - at.y).clamp(0.0, 0.5)).fold(0.0, f32::max);
+            // (Only for what is going and is near enough to be seen at it: asked of every
+            // creature every frame, the drawn ground was 8 ms of a frame and more.)
+            let seen = going.length_squared() > 0.04 && eye.is_none_or(|e| e.distance_squared(at) < 35.0 * 35.0);
+            let rise = [0.4, 1.0].into_iter().filter(|_| seen).filter_map(|part| terrain.as_ref().and_then(|t| crate::feet::ground_at(t, at.x + front.x + going.x * AHEAD * part, at.z + front.z + going.z * AHEAD * part, at.y))).map(|g| (g - at.y).clamp(0.0, 0.5)).fold(0.0, f32::max);
             let (y, want) = (at.y, at.y + rise);
             // (Come down from the air it is where its body is, and rises from there.)
             let was = m.shown.unwrap_or(y);
@@ -258,11 +263,19 @@ fn show(time: Res<Time>, fixed: Res<Time<Fixed>>, registry: Res<Registry>, terra
             let temp = (m.rising + omega * change) * dt;
             m.rising = (m.rising - omega * temp) * decay;
             let eased = (want + (change + temp) * decay).clamp(y - 0.1, y + 0.5);
+            if std::env::var_os("HILL_TRACE").is_some() && agent.driver == Driver::Outside {
+                println!("hill t={:.3} body={:.3} want={:.3} was={:.3} shown={:.3} dt={:.4}", time.elapsed_secs(), y, want, was, eased, dt);
+            }
             transform.translation.y = eased;
             m.shown = Some(eased);
             m.lift = 0.0;
         } else {
-            m.shown = None;
+            // (Leaving the ground it is where it was drawn, and comes to its body from there:
+            // put straight on its body it dropped up to half a metre at every jump of a run uphill.)
+            if let Some(shown) = m.shown.take() {
+                m.lift = (shown - agent.before.lerp(agent.body.pos, between).y).clamp(-0.08, 0.5);
+                transform.translation.y += m.lift;
+            }
             m.rising = 0.0;
         }
 
