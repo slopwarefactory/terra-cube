@@ -44,6 +44,10 @@ pub struct Stage {
     pub stood: Vec<f32>,
     /// How far under the drawn ground its deepest knee or ankle was, each frame.
     pub under: Vec<f32>,
+    /// The trunk of what is played, each frame it stood on the ground: when, how high the
+    /// bone it hangs from is, how far it is tipped nose up (radians), and how high the model
+    /// as a whole was put.
+    pub trunk: Vec<(f32, f32, f32, f32)>,
     laid_out: bool,
     expected: usize,
     settled: u32,
@@ -228,7 +232,7 @@ fn capture(mut commands: Commands, mut stage: ResMut<Stage>, args: Res<Args>, ti
 }
 
 /// While a strip runs: how the camera rode and how the feet stood, each frame, for `gather` to say.
-fn ride(mut stage: ResMut<Stage>, eyes: Query<&GlobalTransform, With<Camera3d>>, terrain: Option<Res<world::Terrain>>, walkers: Query<(&crate::feet::Legs, &Transform, &crate::motion::Mover), With<crate::player::Controlled>>, live: Option<Res<crate::motion::Live>>, bones: Query<&GlobalTransform>) {
+fn ride(time: Res<Time>, mut stage: ResMut<Stage>, eyes: Query<&GlobalTransform, With<Camera3d>>, terrain: Option<Res<world::Terrain>>, walkers: Query<(&crate::feet::Legs, &Transform, &crate::motion::Mover), With<crate::player::Controlled>>, live: Option<Res<crate::motion::Live>>, bones: Query<&GlobalTransform>) {
     if stage.load.is_none() {
         return;
     }
@@ -246,6 +250,10 @@ fn ride(mut stage: ResMut<Stage>, eyes: Query<&GlobalTransform, With<Camera3d>>,
         let under = legs.legs.iter().flat_map(|[_, knee, tip]| [knee, tip]).filter_map(|b| bones.get(*b).ok()).filter_map(|g| crate::feet::ground_at(terrain, g.translation().x, g.translation().z, at.translation.y).map(|ground| ground - g.translation().y)).fold(f32::MIN, f32::max);
         if under > f32::MIN {
             stage.under.push(under);
+        }
+        if let Some(root) = legs.root.and_then(|r| bones.get(r).ok()) {
+            let ahead = at.rotation * Vec3::Z;
+            stage.trunk.push((time.elapsed_secs(), root.translation().y, (root.rotation() * (at.rotation.inverse() * ahead)).y.clamp(-1.0, 1.0).asin(), at.translation.y));
         }
     }
 }
@@ -281,6 +289,23 @@ fn gather(shot: On<bevy::render::view::screenshot::ScreenshotCaptured>, args: Re
         stood.sort_by(f32::total_cmp);
         if let (Some(low), Some(mid), Some(high)) = (stood.get(stood.len() / 20), stood.get(stood.len() / 2), stood.get(stood.len() * 19 / 20)) {
             println!("feet stance-gap mid={:.1}cm from={:.1}cm to={:.1}cm spread={:.1}cm", mid * 100.0, low * 100.0, high * 100.0, (high - low) * 100.0);
+        }
+        // How its trunk rode: how fast the model as a whole was put up or down at the most
+        // (before its clip and its feet), and the bone its body hangs from: how fast that
+        // rose or fell, how much that changed from one frame to the next (a jolt), and how
+        // fast it tipped. By the second, since a frame a picture is taken in is a long one.
+        // A trunk that takes each block of a hillside as a step or a nod is what "not smooth
+        // on hills" looks like; on the level a walk is under 1 m/s and a jolt under 0.5.
+        if stage.trunk.len() > 3 {
+            let rate = |of: &dyn Fn(&(f32, f32, f32, f32)) -> f32| -> Vec<f32> { stage.trunk.windows(2).filter(|w| w[1].0 > w[0].0).map(|w| (of(&w[1]) - of(&w[0])) / (w[1].0 - w[0].0)).collect() };
+            let (model, trunk, nods) = (rate(&|t| t.3), rate(&|t| t.1), rate(&|t| t.2.to_degrees()));
+            let jolts: Vec<f32> = trunk.windows(2).map(|w| w[1] - w[0]).collect();
+            let part = |of: &[f32], p: usize| {
+                let mut of: Vec<f32> = of.iter().map(|v| v.abs()).collect();
+                of.sort_by(f32::total_cmp);
+                of.get((of.len() * p / 100).min(of.len().saturating_sub(1))).copied().unwrap_or(0.0)
+            };
+            println!("trunk model={:.1}m/s rise-p99={:.1}m/s rise={:.1}m/s jolt-p99={:.1}m/s jolt={:.1}m/s nod-p99={:.0}deg/s nod={:.0}deg/s", part(&model, 100), part(&trunk, 99), part(&trunk, 100), part(&jolts, 99), part(&jolts, 100), part(&nods, 99), part(&nods, 100));
         }
         if !stage.under.is_empty() {
             let (worst, frames) = (stage.under.iter().copied().fold(f32::MIN, f32::max), stage.under.iter().filter(|u| **u > 0.0).count());

@@ -42,6 +42,8 @@ pub struct Mover {
     lift: f32,
     /// How high its feet were last drawn while it stood on the ground, if it did.
     shown: Option<f32>,
+    /// How fast that is rising, metres a second: it comes to a new level as on a spring.
+    rising: f32,
     /// The model tipped into its turns and its starts and stops: roll and pitch, radians.
     tilt: Vec2,
     was_speed: f32,
@@ -49,7 +51,7 @@ pub struct Mover {
 
 impl Mover {
     pub fn new(id: u32) -> Self {
-        Self { id, lift: 0.0, shown: None, tilt: Vec2::ZERO, was_speed: 0.0 }
+        Self { id, lift: 0.0, shown: None, rising: 0.0, tilt: Vec2::ZERO, was_speed: 0.0 }
     }
 }
 
@@ -204,7 +206,10 @@ pub(crate) fn tick(terrain: Option<ResMut<Terrain>>, loading: Res<crate::loading
 
 /// Draws each body between ticks, tips the model into its turns, and plays the clip that
 /// fits what it is doing, at the rate that keeps its feet from sliding.
-fn show(time: Res<Time>, fixed: Res<Time<Fixed>>, registry: Res<Registry>, mut live: ResMut<Live>, mut movers: Query<(&mut Mover, &mut Creature, &mut Transform)>) {
+/// How far ahead of itself a creature going uphill makes for the ground, seconds.
+const AHEAD: f32 = 0.25;
+
+fn show(time: Res<Time>, fixed: Res<Time<Fixed>>, registry: Res<Registry>, terrain: Option<Res<Terrain>>, mut live: ResMut<Live>, mut movers: Query<(&mut Mover, &mut Creature, &mut Transform)>) {
     let _slow = crate::Slow::new("show");
     let dt = time.delta_secs();
     let between = fixed.overstep_fraction();
@@ -231,14 +236,33 @@ fn show(time: Res<Time>, fixed: Res<Time<Fixed>>, registry: Res<Registry>, mut l
         // (Until 2026-11-12 the body stood on the cells and the model was moved from there to
         // the drawn ground under its middle: see `World::stood`.)
         if agent.body.grounded {
-            let y = agent.before.lerp(agent.body.pos, between).y;
-            let behind = (m.shown.unwrap_or(y) - y).clamp(-0.1, 0.35);
-            let eased = y + behind * (-(if behind < 0.0 { 26.0 } else { 16.0 }) * dt).exp();
+            // (And going up it begins before it is there. The body is put up onto a block as
+            // it reaches it, all at once; a model that only came after it, and may not be
+            // more than a hand under it, went up a hillside 20 cm in a frame at every block
+            // (`trunk` in a scene's lines: a deer's 20, a wolf's 12, against 3 on the level).
+            // It makes for the ground drawn a quarter of a second ahead of it where that is
+            // higher, as on a spring, and a climb is a ramp.)
+            let at = agent.before.lerp(agent.body.pos, between);
+            // (From the front of its box, which is what is put up onto a block: a deer's is
+            // a third of a metre before its middle.)
+            let going = (agent.body.pos - agent.before).with_y(0.0) * cube_sim::TICKS as f32;
+            let front = going.normalize_or_zero() * agent.body.half;
+            let rise = [0.4, 1.0].into_iter().filter_map(|part| terrain.as_ref().and_then(|t| crate::feet::ground_at(t, at.x + front.x + going.x * AHEAD * part, at.z + front.z + going.z * AHEAD * part, at.y))).map(|g| (g - at.y).clamp(0.0, 0.5)).fold(0.0, f32::max);
+            let (y, want) = (at.y, at.y + rise);
+            let was = m.shown.unwrap_or(want);
+            // (A spring that neither overshoots nor starts at a stroke: critically damped.)
+            let omega = 2.0 / if want > was { 0.11 } else { 0.16 };
+            let (x, change) = (omega * dt, was - want);
+            let decay = 1.0 / (1.0 + x + 0.48 * x * x + 0.235 * x * x * x);
+            let temp = (m.rising + omega * change) * dt;
+            m.rising = (m.rising - omega * temp) * decay;
+            let eased = (want + (change + temp) * decay).clamp(y - 0.1, y + 0.5);
             transform.translation.y = eased;
             m.shown = Some(eased);
             m.lift = 0.0;
         } else {
             m.shown = None;
+            m.rising = 0.0;
         }
 
         let speed = agent.body.ground_speed();

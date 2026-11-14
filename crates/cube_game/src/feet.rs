@@ -35,10 +35,16 @@ impl Plugin for FeetPlugin {
 #[derive(Component)]
 pub struct Legs {
     pub legs: Vec<[Entity; 3]>,
-    root: Option<Entity>,
+    pub(crate) root: Option<Entity>,
     on: f32,
     /// How far the body was pitched to the slope last frame: it comes after the slope's own.
     pitch: f32,
+    /// How far the body was moved up or down last frame: it comes after what the feet ask,
+    /// which changes at a stroke as a foot swings over the edge of a block. (The feet
+    /// themselves do not: eased after the ground, they were in it.)
+    shift: f32,
+    /// Which way the body is long, once read off its feet.
+    long: Option<Vec3>,
     /// Every bone this moved last frame: how the clip had it, and how it was left. A clip
     /// does not pose every bone every frame (a standing animal's root has no track at all),
     /// and a bone the clip has not posed again is still as it was left: moved again from
@@ -70,7 +76,7 @@ fn find(mut commands: Commands, registry: Res<Registry>, creatures: Query<(Entit
                 Some([parts.next()??, parts.next()??, parts.next()??])
             })
             .collect();
-        commands.entity(entity).insert(Legs { legs, root: bones.get("root").and_then(|n| named(n)), on: 0.0, pitch: 0.0, moved: Vec::new() });
+        commands.entity(entity).insert(Legs { legs, root: bones.get("root").and_then(|n| named(n)), on: 0.0, pitch: 0.0, shift: 0.0, long: None, moved: Vec::new() });
     }
 }
 
@@ -171,7 +177,9 @@ pub(crate) fn plant(
             // apart than left and right.)
             let local: Vec<Vec3> = clip.iter().map(|t| at.rotation.inverse() * (*t - at.translation)).collect();
             let spread = |of: fn(&Vec3) -> f32| local.iter().map(of).fold(f32::MIN, f32::max) - local.iter().map(of).fold(f32::MAX, f32::min);
-            let long = if spread(|v| v.x) > spread(|v| v.z) { Vec3::X } else { Vec3::Z };
+            // (Once: a rabbit's feet in a hop are now further apart one way and now the other,
+            // and it was pitched about one and then the other, twenty degrees in a frame.)
+            let long = *legs.long.get_or_insert_with(|| if spread(|v| v.x) > spread(|v| v.z) { Vec3::X } else { Vec3::Z });
             let along: Vec<f32> = local.iter().map(|v| v.dot(long)).collect();
             let middle = along.iter().sum::<f32>() / along.len() as f32;
             let side = |ahead: bool| -> Option<(f32, f32)> {
@@ -185,8 +193,13 @@ pub(crate) fn plant(
                 // hillside, a rabbit at the rim of a terrace stood nose down at 24 degrees
                 // with its fore feet reaching down the wall, for as long as it stood there.)
                 let rise = (ga - gb) / (za - zb);
-                let slope = if rise.abs() > LEDGE { 0.0 } else { (-rise.atan()).clamp(-0.42, 0.42) * legs.on };
-                legs.pitch += (slope - legs.pitch) * ease;
+                // (Less and less of it from there to half as steep again, not all or none: on
+                // blocks a climb is now a slope and now an edge from one stride to the next,
+                // and a moose nodded 280 degrees a second between them. And it comes to
+                // the new pitch over a third of a second.)
+                let edge = 1.0 - ((rise.abs() - LEDGE) / (LEDGE * 0.5)).clamp(0.0, 1.0);
+                let slope = (-rise.atan()).clamp(-0.42, 0.42) * edge * legs.on;
+                legs.pitch += (slope - legs.pitch) * (1.0 - (-5.0 * time.delta_secs()).exp());
                 turn_bone(root, Quat::from_axis_angle(Vec3::Y.cross(at.rotation * long), legs.pitch), entity, at, &parents, &mut poses);
             }
         }
@@ -208,6 +221,8 @@ pub(crate) fn plant(
         // over a kerb.)
         let (least, most) = (rises.iter().copied().fold(f32::MAX, f32::min), rises.iter().copied().fold(f32::MIN, f32::max));
         let shift = (if least > 0.0 { least } else { most.min(0.0) }).clamp(-reach, reach * 0.6);
+        legs.shift += (shift - legs.shift) * ease;
+        let shift = legs.shift;
         if std::env::var_os("FEET_TRACE").is_some() {
             let grounds: Vec<f32> = now.iter().map(|t| ground(*t)).collect();
             println!("plant reach={reach:.2} on={:.2} above={above:.2?} ground={grounds:.2?} rises={rises:.2?} shift={shift:.2}", legs.on);
