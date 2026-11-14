@@ -23,13 +23,19 @@ impl Plugin for LoosePlugin {
 #[derive(Component)]
 struct Felled(u32, u8);
 
+/// A drawn tree that is wanted no longer, and the seconds it is still drawn: what takes its
+/// place (its logs as cells, its region's shape) is made on another thread and comes a few
+/// frames later, and taken away at once there was nothing there in between, a blink.
+#[derive(Component)]
+struct Going(f32);
+
 /// A tree an axe has cut through is drawn as the tree it grew as, where the simulation has
 /// it: going over, lying, and bare once its boughs are off, until it is broken into logs
 /// and is cells (`Thing::cells`); and its stump where it stands, until an axe is taken to
 /// that (`Thing::stump`). Its cells are in the world all the while and are not drawn
 /// (`Block::whole`). Its shape is made on another thread from its first blow, so it is
 /// ready when it goes.
-fn felled(mut commands: Commands, live: Option<Res<Live>>, look: Option<Res<crate::world::Look>>, terrain: Option<Res<crate::world::Terrain>>, mut drawn: Query<(Entity, &Felled, &mut Transform, &mut Visibility)>, mut meshes: ResMut<Assets<Mesh>>, mut making: Local<std::collections::HashMap<(u32, u8), bevy::tasks::Task<Mesh>>>) {
+fn felled(mut commands: Commands, live: Option<Res<Live>>, look: Option<Res<crate::world::Look>>, terrain: Option<Res<crate::world::Terrain>>, time: Res<Time>, mut drawn: Query<(Entity, &Felled, &mut Transform, &mut Visibility, Option<&mut Going>)>, mut meshes: ResMut<Assets<Mesh>>, mut making: Local<std::collections::HashMap<(u32, u8), bevy::tasks::Task<Mesh>>>) {
     let (Some(live), Some(look), Some(terrain)) = (live, look, terrain) else { return };
     let loose = &live.0.loose;
     // (An axe's notch is a wedge cut out of the trunk's own cubes, pale inside: the tree
@@ -54,12 +60,22 @@ fn felled(mut commands: Commands, live: Option<Res<Live>>, look: Option<Res<crat
     };
     let shown = |t: &cube_sim::loose::Thing| if t.felled || t.notch.is_some() { Visibility::Inherited } else { Visibility::Hidden };
     // (As it was drawn, until it is ready as it now is: bare, once its boughs are off.)
-    let have: std::collections::HashSet<(u32, u8)> = drawn.iter().map(|(_, f, ..)| (f.0, f.1)).collect();
-    for (entity, felled, mut at, mut seen) in &mut drawn {
+    let have: std::collections::HashSet<(u32, u8)> = drawn.iter().filter(|(.., going)| going.is_none()).map(|(_, f, ..)| (f.0, f.1)).collect();
+    for (entity, felled, mut at, mut seen, going) in &mut drawn {
         let still = wanted.iter().find(|(t, what)| (t.id, *what) == (felled.0, felled.1)).or_else(|| wanted.iter().find(|(t, what)| t.id == felled.0 && felled.1 == 0 && *what == 1 && !have.contains(&(t.id, 1)))).or_else(|| wanted.iter().find(|(t, what)| t.id == felled.0 && felled.1 >= 3 && *what >= 3 && !have.contains(&(t.id, *what))));
         match still {
             Some((tree, _)) => (*at, *seen) = (place(tree, felled.1), shown(tree)),
-            None => commands.entity(entity).despawn(),
+            None => match going {
+                Some(mut going) => {
+                    going.0 -= time.delta_secs();
+                    if going.0 <= 0.0 {
+                        commands.entity(entity).despawn();
+                    }
+                }
+                None => {
+                    commands.entity(entity).insert(Going(0.12));
+                }
+            },
         }
     }
     making.retain(|key, _| wanted.iter().any(|(t, what)| (t.id, *what) == *key));

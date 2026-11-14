@@ -480,7 +480,11 @@ fn shape_of(form: &Form, land: &cube_sim::terrain::Land, origin: Vec3, level: u8
         }
     } else {
         for (n, limb) in form.limbs.iter().enumerate() {
-            shape.limb_cubes(limb, origin, &ground, n as u32, [ends[&key(limb.a)] == 1, ends[&key(limb.b)] == 1], level);
+            // (Shaded by which tree it is, not by where it comes in the list: a tree drawn
+            // alone once an axe is at it (`loose::felled`) is then the bark it was in its
+            // region's shape, and does not change its pattern at the first blow.)
+            let _ = n;
+            shape.limb_cubes(limb, origin, &ground, limb.tree.wrapping_mul(2_654_435_761), [ends[&key(limb.a)] == 1, ends[&key(limb.b)] == 1], level);
         }
         let wood = shape.indices.len() / 6;
         still.0 = shape.positions.len();
