@@ -98,6 +98,17 @@ pub struct Biped {
     /// lines), which is what stiff looked like.
     carried: f32,
     carrying: f32,
+    /// What hangs from the hips comes after them, each on a damped spring toward where the
+    /// stride would have it: how far each arm is swung, how far the chest is turned against
+    /// the hips, how far the back leans, and how high the shoulders ride over the hips.
+    /// Put straight where the stride has them they were sines in step with the legs to the
+    /// frame, with nothing left over when it stopped: stiff ("it doesnt seem natural ...
+    /// something more flowing", the developer, 2026-11-14). After
+    /// docs/research/2026-11-14-dungeon-crawler-animation.md.
+    arms: [Spring; 2],
+    chest: Spring,
+    back: Spring,
+    ride: Spring,
     /// A foot being brought back under it as it stands, and how far through that it is.
     shuffle: Option<(usize, f32)>,
     /// How much it is in the air, 0 to 1, and how much of that is rising (1) or falling (0);
@@ -117,6 +128,26 @@ pub struct Biped {
     pub steps: [u32; 2],
 }
 
+/// A weight on a damped spring: where it is and how fast it goes.
+#[derive(Clone, Copy, Default, Debug)]
+struct Spring {
+    at: f32,
+    vel: f32,
+}
+
+impl Spring {
+    /// A step toward `to`: `stiff` is how hard it is pulled (its own swing is `sqrt(stiff)`
+    /// radians a second), `damp` how soon it settles (1 is without a swing past).
+    fn step(&mut self, to: f32, stiff: f32, damp: f32, dt: f32) {
+        let parts = (dt * stiff.sqrt() / 0.25).ceil().clamp(1.0, 8.0);
+        let h = dt / parts;
+        for _ in 0..parts as u32 {
+            self.vel += (stiff * (to - self.at) - 2.0 * damp * stiff.sqrt() * self.vel) * h;
+            self.at += self.vel * h;
+        }
+    }
+}
+
 fn smooth(t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
@@ -129,7 +160,7 @@ impl Biped {
             let p = at + turn * Vec3::X * side * frame.hips / 2.0;
             Foot { at: p, yaw, pitch: 0.0, down: true, from: p, clear: 0.0 }
         });
-        Self { frame, at, yaw, vel: Vec3::ZERO, phase: 0.0, feet, runs: 0.0, goes: 0.0, lean: 0.0, high: frame.stands(), carried: frame.stands(), carrying: 0.0, shuffle: None, air: 0.0, rises: 0.0, dip: 0.0, dipping: 0.0, aloft: false, strikes: false, lunge: 0.0, time: 0.0, steps: [0; 2] }
+        Self { frame, at, yaw, vel: Vec3::ZERO, phase: 0.0, feet, runs: 0.0, goes: 0.0, lean: 0.0, high: frame.stands(), carried: frame.stands(), carrying: 0.0, arms: [Spring::default(); 2], chest: Spring::default(), back: Spring::default(), ride: Spring::default(), shuffle: None, air: 0.0, rises: 0.0, dip: 0.0, dipping: 0.0, aloft: false, strikes: false, lunge: 0.0, time: 0.0, steps: [0; 2] }
     }
 
     /// Whether each foot is on the ground.
@@ -335,9 +366,36 @@ impl Biped {
         self.carry(dt);
     }
 
+    /// How far forward an arm would be swung by the stride alone, radians: against its own leg.
+    fn swung(&self, i: usize) -> f32 {
+        let (side, wave, r) = (i as f32 * 2.0 - 1.0, (TAU * self.phase).cos(), self.runs);
+        side * wave * (0.38 + 0.4 * r) * self.goes * (1.0 - self.air) + self.air * (0.9 * self.rises - 0.1)
+    }
+
+    /// What hangs from the hips follows them (`arms`, `chest`, `back`, `ride`). Softer at a
+    /// walk, where an arm swings a third of a stride behind its leg, and tighter at a run.
+    fn hang(&mut self, dt: f32) {
+        let r = self.runs;
+        for i in 0..2 {
+            // (A little less asked than is wanted: near its own swing it goes further.)
+            let to = self.swung(i) * (0.8 - 0.05 * r) + self.air * (0.9 * self.rises - 0.1) * 0.2;
+            self.arms[i].step(to, 110.0 + 210.0 * r + 400.0 * self.air, 0.3 + 0.15 * r, dt);
+        }
+        let twist = (0.08 + 0.1 * r) * self.goes * (TAU * self.phase).cos();
+        self.chest.step(-twist * 0.9, 260.0, 0.4, dt);
+        self.back.step(self.lean, 120.0, 0.45, dt);
+        // (The shoulders are borne on the hips: as those drop they are late to, and as those
+        // stop they come down on them a little.)
+        if (self.ride.at - self.high).abs() > 0.5 {
+            self.ride = Spring { at: self.high, vel: 0.0 };
+        }
+        self.ride.step(self.high, 420.0, 0.5, dt);
+    }
+
     /// The hips come to where they are to be over a tenth of a second, neither at a stroke
     /// nor past it (a critically damped spring); put somewhere else altogether, they are there.
     fn carry(&mut self, dt: f32) {
+        self.hang(dt);
         if (self.high - self.carried).abs() > 0.5 {
             (self.carried, self.carrying) = (self.high, 0.0);
             return;
@@ -376,8 +434,10 @@ impl Biped {
         let (breath, drift) = ((self.time * 1.6).sin() * still, (self.time * 0.43).sin() * still);
         let middle = Vec3::new(self.at.x, self.carried, self.at.z) - turn * Vec3::X * ((0.022 * (1.0 - r) + 0.008) * goes * over + 0.014 * drift);
         // The shoulders turn against the hips, on a back that leans; the head stays level.
-        let chest = turn * Quat::from_rotation_y(-twist * 0.9) * Quat::from_rotation_z(0.02 * drift) * Quat::from_rotation_x(self.lean - 0.012 * breath);
-        let shoulders = middle + turn * Quat::from_rotation_x(self.lean * 0.7) * Vec3::Y * f.torso;
+        let chest = turn * Quat::from_rotation_y(self.chest.at) * Quat::from_rotation_z(0.02 * drift) * Quat::from_rotation_x(self.back.at - 0.012 * breath);
+        // (Riding a little after the hips, by no more than a thumb's width either way.)
+        let ride = (self.ride.at - self.carried).clamp(-0.02, 0.02) * f.torso / 0.5;
+        let shoulders = middle + turn * Quat::from_rotation_x(self.back.at * 0.7) * Vec3::Y * (f.torso + ride);
         let head = (shoulders + turn * Quat::from_rotation_x(self.lean * 0.4) * Vec3::Y * (f.neck + f.head / 2.0), turn * Quat::from_rotation_x(self.lean * 0.25));
         let legs = [0, 1].map(|i| {
             let side = i as f32 * 2.0 - 1.0;
@@ -394,7 +454,7 @@ impl Biped {
             let side = i as f32 * 2.0 - 1.0;
             // (In the air they come up and out: forward and up as it rises, out as it falls.)
             let air = self.air;
-            let swing = side * wave * (0.38 + 0.4 * r) * goes * (1.0 - air) + air * (0.9 * self.rises - 0.1);
+            let swing = self.arms[i].at;
             let bend = (0.22 + 1.25 * r + swing.max(0.0) * (0.5 - 0.2 * r)) * (1.0 - air) + air * 0.8 + 0.03 * breath;
             let out = Quat::from_rotation_z(side * (0.09 + 0.1 * r + air * (0.25 + 0.4 * (1.0 - self.rises))));
             let shoulder = shoulders + chest * Vec3::X * side * f.shoulders / 2.0;
@@ -597,5 +657,38 @@ mod tests {
             assert!(Vec2::new(foot.x - s.legs[i][0].x, foot.z - z).length() < 0.08, "foot {i} is {:?} with the body at z {z:.2}", foot);
         }
         assert!((s.pelvis.0.y - f.stands()).abs() < 0.02, "hips at {:.3}, stands {:.3}", s.pelvis.0.y, f.stands());
+    }
+
+    #[test]
+    fn what_hangs_from_the_hips_comes_after_them_and_settles() {
+        let f = Frame::person(1.75);
+        let mut b = Biped::new(f, Vec3::ZERO, 0.0);
+        let (dt, mut at) = (1.0 / 60.0, Vec3::ZERO);
+        // Walking: each arm swings, by more than a hand and less than a wild fling, and is
+        // behind where the stride alone would have it (it comes after its leg).
+        let (mut most, mut behind, mut n) = (0.0f32, 0, 0);
+        for k in 0..600 {
+            at.z += 1.4 * dt;
+            b.step(dt, at, 0.0, false, |_, _| 0.0);
+            if k > 200 {
+                most = most.max(b.arms[0].at.abs());
+                // (Behind: still going the way the stride's own swing has already turned from.)
+                let (asked, vel) = (b.swung(0), b.arms[0].vel);
+                n += 1;
+                behind += ((asked - b.arms[0].at) * vel > 0.0) as u32;
+            }
+        }
+        assert!((0.2..0.6).contains(&most), "an arm swings {most:.2} rad at a walk");
+        assert!(behind * 10 > n * 6, "an arm follows its leg {behind} frames of {n}");
+        // Stopped: they are still moving a moment after the body is, and then are not.
+        for _ in 0..12 {
+            b.step(dt, at, 0.0, false, |_, _| 0.0);
+        }
+        let after = b.arms.iter().map(|a| a.vel.abs() + a.at.abs()).fold(0.0, f32::max);
+        for _ in 0..240 {
+            b.step(dt, at, 0.0, false, |_, _| 0.0);
+        }
+        let rest = b.arms.iter().map(|a| a.vel.abs() + a.at.abs()).fold(0.0, f32::max);
+        assert!(after > 0.05 && rest < 0.03, "arms after it stopped: {after:.3} of swing left a fifth of a second on, and {rest:.3} four seconds on");
     }
 }
