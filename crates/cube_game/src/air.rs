@@ -173,6 +173,8 @@ struct Fish {
 struct Ring {
     school: usize,
     since: f32,
+    /// Where the fish that made it went back in.
+    at: Vec3,
 }
 
 /// Where each school keeps to.
@@ -341,14 +343,14 @@ fn setup(mut commands: Commands, registry: Res<Registry>, mut meshes: ResMut<Ass
     // Fish: the length of a hand to a forearm, swimming by the tail. They keep just under
     // the surface where they can be seen, a school together.
     let ring = meshes.add(Annulus::new(0.9, 1.0).mesh().resolution(24));
-    let ripple = materials.add(StandardMaterial { base_color: Color::srgba(0.9, 0.95, 1.0, 0.5), alpha_mode: AlphaMode::Blend, unlit: true, double_sided: true, cull_mode: None, ..default() });
+    let ripple = materials.add(StandardMaterial { base_color: Color::srgba(0.9, 0.95, 1.0, 0.25), alpha_mode: AlphaMode::Blend, unlit: true, double_sided: true, cull_mode: None, ..default() });
     for school in 0..SCHOOLS {
         for _ in 0..SCHOOL {
             let long = 0.8 + roll(&mut state) * 1.4;
             commands.spawn((Fish { school, own: roll(&mut state) * 100.0, long, leapt: -100.0 }, Transform::from_translation(far), Visibility::default())).with_child(model(&registry, "minnow", "swim", 1.2 + roll(&mut state) * 0.6));
         }
         // The ring a leaping fish leaves, one to a school.
-        commands.spawn((Ring { school, since: -100.0 }, Mesh3d(ring.clone()), MeshMaterial3d(ripple.clone()), Transform::from_translation(far), NotShadowCaster));
+        commands.spawn((Ring { school, since: -100.0, at: Vec3::ZERO }, Mesh3d(ring.clone()), MeshMaterial3d(ripple.clone()), Transform::from_translation(far), NotShadowCaster));
     }
     commands.insert_resource(Schools(vec![far; SCHOOLS]));
     // Hawks, high over the land: wheeling on spread wings, seen from below against the sky.
@@ -882,7 +884,10 @@ fn fish(
         // A leap: seldom, a third of a second up and a third down.
         // (By the second and not by the frame: a chance a frame made fish leap, and splash,
         // many times as often on a fast machine as on a slow one.)
-        if t - one.leapt > 9.0 && roll(&mut state) < 0.036 * time.delta_secs() {
+        // (Seldom: one of a school a minute or so. Each every half minute, there was a
+        // fish in the air over any water at any moment: "they're often jumping out?", the
+        // developer, 2026-11-14.)
+        if t - one.leapt > 60.0 && roll(&mut state) < 0.004 * time.delta_secs() {
             one.leapt = t;
             // And is heard to, one leap in four: a small splash from where it came out. (Every
             // leap of every fish was a splash every two seconds beside any water.)
@@ -890,13 +895,15 @@ fn fish(
                 bank.play(&mut commands, "splash", Some(now), 0.2);
             }
             if let Some((mut ring, _)) = rings.iter_mut().find(|(r, _)| r.school == one.school) {
-                ring.since = t + 0.55;
+                // (Where it goes back in, not at the middle of its school: the ring was a
+                // metre of white hoop on the water some way from any fish.)
+                (ring.since, ring.at) = (t + 0.45, path(round + 0.25));
             }
         }
         let leap = ((t - one.leapt) / 0.6).clamp(0.0, 1.0);
         let mut nose = 0.0;
         if leap < 1.0 {
-            height += 0.42 * (4.0 * leap * (1.0 - leap));
+            height += 0.2 * (4.0 * leap * (1.0 - leap));
             nose = 0.9 * (1.0 - 2.0 * leap);
         }
         *at = Transform::from_translation(now.with_y(surface + height)).looking_to((soon - now).normalize_or(Vec3::X), Vec3::Y).with_scale(Vec3::splat(one.long));
@@ -907,7 +914,7 @@ fn fish(
         let age = (t - ring.since) / 1.5;
         let home = schools.0[ring.school];
         *at = if (0.0..1.0).contains(&age) && home.y > -100.0 {
-            Transform::from_translation(home.with_y(surface + 0.01)).with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)).with_scale(Vec3::splat(0.1 + 0.5 * age))
+            Transform::from_translation(ring.at.with_y(surface + 0.01)).with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)).with_scale(Vec3::splat(0.05 + 0.25 * age))
         } else {
             Transform::from_translation(hidden)
         };
