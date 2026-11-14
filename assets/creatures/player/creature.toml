@@ -3,10 +3,14 @@ kind = "player"
 plan = "biped"
 subject = "an ordinary man in his thirties, a rough undyed homespun short-sleeved tunic tied at the waist with a leather strip, loose dark trousers bound at the ankle, simple stitched leather shoes, short brown hair, a few days of stubble, calm plain face, average build"
 height = 1.75
+# He moves by a person's own walk, run and sprint (the hand-animated library, as recorded),
+# mixed by how fast he goes, with his feet put on the ground: not by the two-legged walker
+# (`walked = [..]`), which made a body whose shoulders did not answer its legs (2026-11-14,
+# docs/pipeline.md, "What motion has to be"). The speeds are the game's, as they were.
+speeds = [1.4, 5.2, 6.5]
 # Walking and running are the two-legged walker's (`cube_anim::biped`, `forge/src/strider.rs`),
 # proven on boxes first (`make person`) and chosen over the library's by the developer,
 # 2026-11-12. Everything else it does is still the library's.
-walked = ["walk", "run", "sprint"]
 
 [life]
 temper = "person"

@@ -2,9 +2,9 @@
 height = 1.75
 length = 0.66656286
 width = 0.6905998
-walk_speed = 1.4019289
-run_speed = 5.207165
-sprint_speed = 6.5089564
+walk_speed = 1.4
+run_speed = 5.2
+sprint_speed = 6.5
 triangles = 8364
 joints = 65
 
@@ -57,16 +57,16 @@ source = "library"
 speed = 0.0
 
 [clips.run]
-seconds = 0.5
+seconds = 0.93333334
 looping = true
-source = "walker"
-speed = 5.207165
+source = "library"
+speed = 5.213713
 
 [clips.sprint]
-seconds = 0.43333334
+seconds = 0.6666667
 looping = true
-source = "walker"
-speed = 6.5089564
+source = "library"
+speed = 8.029119
 
 [clips.swim]
 seconds = 1.3333334
@@ -75,10 +75,10 @@ source = "library"
 speed = 0.0
 
 [clips.walk]
-seconds = 1.0
+seconds = 1.3333334
 looping = true
-source = "walker"
-speed = 1.4019289
+source = "library"
+speed = 0.94889575
 
 [bones]
 foot0 = "mixamorig:LeftToe_End"
@@ -88,11 +88,6 @@ leg0 = "mixamorig:LeftUpLeg>mixamorig:LeftLeg>mixamorig:LeftFoot"
 leg1 = "mixamorig:RightUpLeg>mixamorig:RightLeg>mixamorig:RightFoot"
 neck = "mixamorig:Neck"
 root = "mixamorig:Hips"
-
-[stride]
-bones = ["mixamorig:Hips", "mixamorig:LeftUpLeg", "mixamorig:LeftLeg", "mixamorig:LeftFoot", "mixamorig:LeftToeBase", "mixamorig:LeftToe_End", "mixamorig:RightUpLeg", "mixamorig:RightLeg", "mixamorig:RightFoot", "mixamorig:RightToeBase", "mixamorig:RightToe_End", "mixamorig:Spine", "mixamorig:Spine1", "mixamorig:Spine2", "mixamorig:LeftShoulder", "mixamorig:LeftArm", "mixamorig:LeftForeArm", "mixamorig:LeftHand", "mixamorig:LeftHandIndex1", "mixamorig:LeftHandIndex2", "mixamorig:LeftHandIndex3", "mixamorig:LeftHandIndex4", "mixamorig:LeftHandMiddle1", "mixamorig:LeftHandMiddle2", "mixamorig:LeftHandMiddle3", "mixamorig:LeftHandMiddle4", "mixamorig:LeftHandPinky1", "mixamorig:LeftHandPinky2", "mixamorig:LeftHandPinky3", "mixamorig:LeftHandPinky4", "mixamorig:LeftHandRing1", "mixamorig:LeftHandRing2", "mixamorig:LeftHandRing3", "mixamorig:LeftHandRing4", "mixamorig:LeftHandThumb1", "mixamorig:LeftHandThumb2", "mixamorig:LeftHandThumb3", "mixamorig:LeftHandThumb4", "mixamorig:Neck", "mixamorig:Head", "mixamorig:HeadTop_End", "mixamorig:RightShoulder", "mixamorig:RightArm", "mixamorig:RightForeArm", "mixamorig:RightHand", "mixamorig:RightHandIndex1", "mixamorig:RightHandIndex2", "mixamorig:RightHandIndex3", "mixamorig:RightHandIndex4", "mixamorig:RightHandMiddle1", "mixamorig:RightHandMiddle2", "mixamorig:RightHandMiddle3", "mixamorig:RightHandMiddle4", "mixamorig:RightHandPinky1", "mixamorig:RightHandPinky2", "mixamorig:RightHandPinky3", "mixamorig:RightHandPinky4", "mixamorig:RightHandRing1", "mixamorig:RightHandRing2", "mixamorig:RightHandRing3", "mixamorig:RightHandRing4", "mixamorig:RightHandThumb1", "mixamorig:RightHandThumb2", "mixamorig:RightHandThumb3", "mixamorig:RightHandThumb4"]
-rests = [[-0.000000011635828, -0.7071068, -0.000000011635826, 0.7071067], [-0.99849707, -0.015808774, -0.015782487, 0.050046682], [-0.0003785259, -0.1257657, 0.13902545, 0.98227024], [0.343656, 0.42838597, -0.5591335, 0.6210924], [0.17961818, 0.14477906, -0.026731808, 0.9726571], [-0.000000019674673, -0.000016239403, 0.00000015645637, 1.0], [0.9984685, 0.017467594, 0.017494977, 0.04949223], [0.029576328, -0.14892352, 0.1358433, 0.9790269], [0.2566055, 0.56131077, -0.6040549, 0.5041839], [0.17700996, 0.21967353, -0.04055587, 0.958523], [0.0000000066404486, -0.000024410445, 0.00000005213647, 1.0], [-0.0008628062, 0.02936092, 0.029361017, 0.9991372], [-0.00000000212331, 0.00000017731145, 0.00000000367572, 1.0], [0.00072485843, -0.041078787, -0.0411071, 0.99830973], [-0.78689945, -0.0364499, -0.017968759, 0.6157417], [0.1214085, -0.009145361, 0.123029664, 0.98490614], [-0.013588819, 0.0010235837, -0.1586259, 0.9872447], [0.0119838985, 0.0008183476, 0.014057403, 0.99982905], [-0.31898728, -0.010497153, -0.05259204, 0.9462405], [-0.31985816, -0.019087367, -0.010001161, 0.9472204], [-0.17384939, -0.0068092244, -0.0066286605, 0.9847264], [0.000000003958122, -0.00000008754432, -0.00000017276034, 1.0], [-0.3112208, 0.004346647, 0.019028453, 0.9501372], [-0.35305652, 0.0190936, -0.014466901, 0.93529534], [-0.17353283, 0.014086804, -0.0011017434, 0.9847267], [-0.0000016950069, -0.00000009778886, -0.000000010244548, 1.0], [-0.30916137, 0.02080304, 0.101178154, 0.94538325], [-0.35485256, 0.069687255, 0.0031939265, 0.932316], [-0.16810213, 0.04481544, 0.006875442, 0.9847263], [0.00000047162757, 0.000000023283064, -0.000000077765435, 1.0], [-0.3158194, 0.019888282, 0.09869339, 0.9434629], [-0.27993506, 0.062349577, -0.023409352, 0.95770603], [-0.1701539, 0.036885805, -0.00014498309, 0.9847269], [-0.0000024601286, 0.00000000081490725, 0.000000059080776, 1.0], [-0.19396588, 0.010524092, -0.36545578, 0.9103344], [-0.2027306, -0.084181555, 0.23830855, 0.9460564], [-0.07395881, 0.016887037, 0.064899616, 0.995004], [0.0000019036233, 0.0000000037252903, -0.00000025518239, 1.0], [-0.04677046, -0.20074041, -0.19969651, 0.9579338], [-0.00000004167797, 0.000000022351742, -0.0000001573774, 1.0], [-0.00000001831843, 0.00000006146729, -0.00000008905401, 1.0], [0.74356097, 0.27556425, 0.2581679, 0.5518431], [-0.069141276, 0.91785574, -0.15841639, 0.3573018], [0.01967795, -0.26120418, 0.16131847, 0.9515049], [0.018547034, 0.28415203, -0.028926212, 0.9581633], [-0.18533315, -0.6881342, 0.22822489, 0.6633523], [0.09230251, -0.14571181, 0.316642, 0.93273056], [0.063324764, 0.014786699, 0.16150993, 0.9847263], [0.00000055879354, 0.00000015646219, 0.00000007636845, 1.0], [-0.10887579, -0.931228, 0.28351408, 0.20144576], [0.28798366, -0.0018712692, 0.13606593, 0.9479177], [0.1494071, -0.011272822, 0.08867968, 0.9847266], [-0.000000004656613, -0.00000014342368, 0.000000029802322, 1.0], [0.014359981, 0.90462416, -0.33106005, 0.26804522], [0.31741017, -0.014877589, -0.12547587, 0.9398326], [0.15938579, -0.042633105, -0.055603616, 0.9847268], [-0.000000037252903, 0.000000055879354, -0.00000012852252, 1.0], [-0.009485967, 0.87144864, -0.31800812, 0.37330696], [0.23937884, 0.16589318, -0.14620723, 0.9454104], [0.16608004, -0.034408864, -0.039323848, 0.9847269], [0.000002071727, -0.00000022258607, -0.00000043679026, 1.0], [-0.08208678, -0.44805092, 0.40135354, 0.79462403], [-0.22355779, -0.25093505, 0.054260015, 0.9402709], [-0.062912315, -0.018073197, 0.07538071, 0.9950041], [0.00000002793968, -0.0000001527369, -0.000000013038517, 1.0]]
-seat = [0.001953128, 0.52734405, -0.021484377]
 
 [grip.Left]
 at = [-0.0007776916, 0.04936546, -0.0140634775]

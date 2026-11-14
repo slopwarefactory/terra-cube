@@ -153,6 +153,12 @@ pub struct Creature {
     /// (`strider.rs`): of `idle`, `walk`, `run`, `sprint`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub walked: Vec<String>,
+    /// The speeds it goes at walking, running and sprinting, metres a second, where they are
+    /// not to be its clips' own: the game mixes its gaits to cover the ground at whatever
+    /// speed it goes (`creatures::drive`). The library's walk is a stroll of 0.95 m/s, and
+    /// the player walks at 1.4.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speeds: Option<[f32; 3]>,
     /// For what goes on our own skeleton: how far down on its legs it stands and goes, of 1
     /// (which is lying on its belly). A hedgehog's model has legs as long as its body is
     /// deep, and stood straight on them it was a ball on stilts: it goes at 0.5.

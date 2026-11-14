@@ -78,7 +78,7 @@ Every animal on this plan lies the same way (on its chest, forelegs ahead). `res
 
 In carried clips (`attack`, `hurt`, `die`) the neck and head get half the turn and the tail a third: our two bones stand for the hand-animated wolf's four and eight. `FORGE_TRACE=1` prints, for each clip, which bones hold the most-stretched skin.
 
-### A person moved by the two-legged walker (`walked = [..]` in `creature.toml`; the player)
+### A person moved by the two-legged walker (`walked = [..]` in `creature.toml`; nobody now: the player was until 2026-11-14)
 
 Tripo's humanoid skeleton and skin are kept (they are sound). Motion is not from clips: the game runs the two-legged walker (`cube_anim::biped`) every frame and turns each bone to it (`cube_game::stride`).
 
@@ -188,6 +188,19 @@ feet) and break 3 at a run on blocks. The player breaks 1 while he moves: his bo
 walker's legs and formulas above them (`stride`), which is why his shoulders do not answer
 his legs. `--clips-only` is the other way round, the library's recorded walk and run with
 feet put on the ground: `shots/player-compare.mp4` sets the two side by side.
+
+**Decided 2026-11-14: the player moves by the recorded clips.** The developer left it open
+("use that repo i gave you for some guidelines for how they built things"), and that project
+bakes every creature's whole-body motion ahead of time and only mixes and corrects it as the
+game runs (research/2026-11-14-dungeon-crawler-animation.md). So `walked = [..]` is off the
+player: his walk, run and sprint are the library's (`Walk_Loop`, `Jog_Fwd_Loop`,
+`Sprint_Loop`), mixed by how fast he goes on one stride (`creatures::drive`), with feet put on
+the ground (`feet::plant`). The library's walk is a stroll of 0.95 m/s, so the speeds he goes
+at are said apart from his clips (`speeds = [1.4, 5.2, 6.5]` in `creature.toml`). What it
+cost: on a hillside his standing foot strays 23 cm where the walker kept it to 10 (`make
+feet`); nothing is under the ground (`make legs`). The walker stays for whoever is marked
+`walked`, and for `make person`. Next by the same fundamentals: turning and stopping are
+still a change of clip; nothing leans him into speeding up but the body's own tilt.
 
 ## Judging motion
 
