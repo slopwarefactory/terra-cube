@@ -40,6 +40,21 @@ pub struct Wind {
     pub wind: Vec4,
 }
 
+/// How much of the sky is cloud now, 0 to 1 (`cube_sim::sky::cloud`); `CLOUD=1` sets it, and
+/// `RAIN` sets it to overcast with it, since it does not rain from a clear sky.
+pub fn overcast(when: f32) -> f32 {
+    let set = |name: &str| std::env::var(name).ok().and_then(|v| v.parse::<f32>().ok());
+    set("CLOUD").or(set("RAIN").filter(|r| *r > 0.0).map(|_| 1.0)).unwrap_or_else(|| cube_sim::sky::cloud(when))
+}
+
+/// How hard it rains now, 0 to 1, and whether what falls is snow (`cube_sim::sky::rain`,
+/// `snows`): for what draws it and what sounds it. `RAIN=0.8` (and `SNOW=1`) on any
+/// `cargo sandbox` sets it, to be looked at and listened to.
+pub fn falling(when: f32) -> (f32, bool) {
+    let rain = std::env::var("RAIN").ok().and_then(|v| v.parse().ok()).unwrap_or_else(|| cube_sim::sky::rain(when));
+    (rain, std::env::var_os("SNOW").is_some() || cube_sim::sky::snows(when))
+}
+
 /// How hard the wind blows now, 0 to 1 (`cube_sim::sky::wind`, or `--wind`): the one wind,
 /// for the leaves, for what is heard and for what drifts.
 #[derive(Resource, Default)]
@@ -459,7 +474,11 @@ fn sky(
         // lit by it, which is twilight. Only well under (fifteen degrees: night proper) is
         // it gone, so the last of the glow fades out and is not cut off.
         let glow = ((to_sun.y + 0.26) / 0.1).clamp(0.0, 1.0);
-        light.illuminance = lux::RAW_SUNLIGHT * glow * (1.0 + 0.8 * low * low);
+        // Under cloud the sun itself is mostly gone and the sky's own light is what is left:
+        // a dull day is flat and without hard shadows. (`sky::cloud`; rain fell out of a
+        // sunlit sky until this.)
+        let cloud = overcast(hour);
+        light.illuminance = lux::RAW_SUNLIGHT * glow * (1.0 + 0.8 * low * low) * (1.0 - 0.7 * cloud * cloud);
         // The air here reddens a low sun only a little; an evening wants amber.
         light.color = Color::srgb(1.0, 1.0 - 0.08 * low * low, 1.0 - 0.18 * low * low);
         // Mist thins as the sun drops, or the low light floods it and whites the picture out,

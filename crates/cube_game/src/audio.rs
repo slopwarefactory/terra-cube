@@ -189,7 +189,7 @@ fn ears(mut commands: Commands, time: Res<Time>, mut bank: ResMut<Bank>, cameras
 }
 
 /// The beds: sounds that go on, each a set of recordings (`amb_wind_1`, `amb_wind_2`, ...).
-const BEDS: [&str; 4] = ["amb_wind", "amb_night", "amb_water", "torch_loop"];
+const BEDS: [&str; 5] = ["amb_wind", "amb_night", "amb_water", "torch_loop", "amb_rain"];
 /// Seconds one recording of a bed takes to give way to the next.
 const FADE: f32 = 7.0;
 
@@ -207,8 +207,8 @@ struct Bed {
 /// said so.
 #[derive(Default)]
 struct Beds {
-    now: [f32; 4],
-    change: [f32; 4],
+    now: [f32; 5],
+    change: [f32; 5],
     said: f32,
 }
 
@@ -223,7 +223,10 @@ fn air(mut commands: Commands, time: Res<Time>, mut bank: ResMut<Bank>, live: Op
     // Of a file levelled to -27 dB: with the air's 0.3 and the master's 0.8, the wind of an
     // open meadow lies between -62 dB in a lull and -53 in a gust, a summer night's bed of
     // insects at -56 (the crickets heard one by one are over it), a river at its bank at -53. A footfall is near -38.
-    let want = [a.wind * 0.3 * (0.2 + 1.1 * breeze.0).min(1.0), a.night * 0.14, a.water * 0.22, if torches.is_empty() { 0.0 } else { 0.25 }];
+    // (Rain is over the wind and under a footfall: a downpour some 6 dB over a gust. Snow
+    // falls without a sound.)
+    let (rain, snow) = crate::world::falling(live.0.when);
+    let want = [a.wind * 0.3 * (0.2 + 1.1 * breeze.0).min(1.0), a.night * 0.14 * (1.0 - 0.8 * rain), a.water * 0.22, if torches.is_empty() { 0.0 } else { 0.25 }, if snow { 0.0 } else { rain * 0.55 }];
     let ease = 1.0 - (-1.5 * dt).exp();
     let say = bank.said && t >= state.said;
     if say {

@@ -86,3 +86,8 @@ fi
 # what is hard (no pick on rock was found).
 c bigsoundbank-1305.ogg dig --count 5 --min 0.15 --max 1.6 --high 60 --gap 0.2 --lead 0.02 --tail 0.15
 c bigsoundbank-1084.ogg pick --count 4 --min 0.04 --max 1.5 --high 80 --gap 0.15 --lead 0.015 --tail 0.3
+# Rain: a summer rain (three stretches far apart) and rain on standing water (one).
+bed bigsoundbank-1019.ogg amb_rain_1 8 32 120
+bed bigsoundbank-1019.ogg amb_rain_2 58 32 120
+bed bigsoundbank-1019.ogg amb_rain_3 112 32 120
+bed bigsoundbank-1290.ogg amb_rain_4 20 32 120

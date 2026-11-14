@@ -19,7 +19,7 @@ pub struct AirPlugin;
 
 impl Plugin for AirPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup).add_systems(Update, clock).add_systems(Update, (motes, leaves, butterflies, birds, glow, heavens, songbirds, dragonflies, fireflies, swallows, fish));
+        app.add_systems(Startup, setup).add_systems(Update, clock).add_systems(Update, rain).add_systems(Update, (motes, leaves, butterflies, birds, glow, heavens, songbirds, dragonflies, fireflies, swallows, fish));
     }
 }
 
@@ -101,6 +101,14 @@ const GALAXY: Vec3 = Vec3::new(0.62, 0.32, -0.72);
 /// A speck of pollen or down. `0` is its own number, so no two move alike.
 #[derive(Component)]
 struct Mote(f32);
+
+/// A drop of rain, or a flake of snow: its own number, which says where it starts and how
+/// hard it must rain before it falls at all.
+#[derive(Component)]
+struct Drop(f32);
+
+/// As many drops as fall round the camera in a downpour.
+const DROPS: usize = 2400;
 
 /// A leaf on its way down: how it tumbles, and its own number.
 #[derive(Component)]
@@ -207,6 +215,14 @@ fn setup(mut commands: Commands, registry: Res<Registry>, mut meshes: ResMut<Ass
         let size = 0.6 + roll(&mut state) * 1.2;
         let mut mote = commands.spawn((Mote(roll(&mut state) * 100.0), Mesh3d(speck.clone()), Transform::from_translation(far).with_scale(Vec3::splat(size)), NotShadowCaster));
         mote.insert(MeshMaterial3d(pale.clone()));
+    }
+    // Rain: thin pale streaks, each a cuboid as everything is; the same ones are snow in the
+    // cold, small and slow. Unlit and a little clear: two thousand of them lit and shadowed
+    // would be the cost of a wood.
+    let streak = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+    let wet = materials.add(StandardMaterial { base_color: Color::srgba(0.6, 0.66, 0.76, 0.32), alpha_mode: AlphaMode::Blend, unlit: true, ..default() });
+    for _ in 0..DROPS {
+        commands.spawn((Drop(roll(&mut state)), Mesh3d(streak.clone()), MeshMaterial3d(wet.clone()), Transform::from_translation(far).with_scale(Vec3::ZERO), NotShadowCaster));
     }
     // Fireflies: out from dusk, a few together at the edge of a wood or over long grass, each
     // drifting about its own spot and lighting for a moment every few seconds.
@@ -377,6 +393,39 @@ fn motes(time: Res<Time>, breeze: Res<crate::world::Breeze>, cameras: Query<&Glo
         // Not in the camera's face: a speck a hand from the lens glowed as a white ball the
         // size of a head. It thins to nothing inside three metres.
         at.scale = Vec3::splat(((at.translation.distance(eye) - 1.5) / 1.5).clamp(0.0, 1.0));
+    }
+}
+
+/// Rain falls round the camera when it rains (`world::falling`): as many of the drops as it
+/// rains hard, straight down and a little with the wind, each gone at the ground and begun
+/// again overhead. In the cold they are flakes, small and slow and wandering.
+fn rain(time: Res<Time>, live: Option<Res<crate::motion::Live>>, breeze: Res<crate::world::Breeze>, cameras: Query<&GlobalTransform, With<Camera3d>>, terrain: Option<Res<Terrain>>, mut drops: Query<(&Drop, &mut Transform)>) {
+    let (Some(eye), Some(terrain), Some(live)) = (eye(&cameras), terrain, live) else { return };
+    let (hard, snow) = crate::world::falling(live.0.when);
+    let (t, dt) = (time.elapsed_secs(), time.delta_secs());
+    let reach = Vec3::new(7.0, 5.0, 7.0);
+    for (drop, mut at) in &mut drops {
+        let own = drop.0;
+        // (The lightest rain is a seventh of them; none when it is dry.)
+        if hard <= 0.02 || own > 0.15 + hard * 0.85 {
+            at.scale = Vec3::ZERO;
+            continue;
+        }
+        let fall = if snow { Vec3::new((t * 0.8 + own * 40.0).sin() * 0.5, -1.3, (t * 0.7 + own * 90.0).cos() * 0.5) } else { Vec3::new(0.0, -9.5, 0.0) };
+        at.translation += (fall + WIND * (0.3 + 2.0 * breeze.0)) * dt;
+        let mut off = at.translation - eye;
+        if off.abs().max_element() > reach.x * 3.0 {
+            off = Vec3::new((own * 12.989 * 31.0).fract() * 2.0 - 1.0, (own * 78.233 * 17.0).fract() * 2.0 - 1.0, (own * 37.719 * 23.0).fract() * 2.0 - 1.0) * reach;
+        }
+        let wrapped = Vec3::new((off.x + reach.x).rem_euclid(reach.x * 2.0) - reach.x, (off.y + reach.y).rem_euclid(reach.y * 2.0) - reach.y, (off.z + reach.z).rem_euclid(reach.z * 2.0) - reach.z);
+        at.translation = eye + wrapped;
+        // (At the ground it is gone: it begins again at the top of the box.)
+        if at.translation.y < terrain.ground(at.translation.x, at.translation.z) {
+            at.translation.y = eye.y + reach.y;
+        }
+        // (Not in the camera's face, as a speck is not.)
+        let near = ((at.translation.distance(eye) - 0.8) / 1.0).clamp(0.0, 1.0);
+        at.scale = if snow { Vec3::splat(0.035) } else { Vec3::new(0.008, 0.3, 0.008) } * near;
     }
 }
 
