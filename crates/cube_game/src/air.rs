@@ -399,11 +399,64 @@ fn motes(time: Res<Time>, breeze: Res<crate::world::Breeze>, cameras: Query<&Glo
 /// Rain falls round the camera when it rains (`world::falling`): as many of the drops as it
 /// rains hard, straight down and a little with the wind, each gone at the ground and begun
 /// again overhead. In the cold they are flakes, small and slow and wandering.
-fn rain(time: Res<Time>, live: Option<Res<crate::motion::Live>>, breeze: Res<crate::world::Breeze>, cameras: Query<&GlobalTransform, With<Camera3d>>, terrain: Option<Res<Terrain>>, mut drops: Query<(&Drop, &mut Transform)>) {
+/// What stops the rain round the camera: the top of whatever is highest over each half
+/// metre of ground (a crown, a ledge, the ground itself), so that none falls under a tree
+/// or into a cave. A few columns are looked at each frame, going round; the square is begun
+/// again when the camera has left its middle.
+struct Cover {
+    /// The corner of the square, in half metres, and the next column to look at.
+    corner: IVec2,
+    next: usize,
+    tops: Vec<f32>,
+}
+
+impl Default for Cover {
+    fn default() -> Self {
+        Cover { corner: IVec2::MAX, next: 0, tops: vec![f32::NEG_INFINITY; Self::ACROSS * Self::ACROSS] }
+    }
+}
+
+impl Cover {
+    /// Half metres across (eighteen metres: the drops' box and a little over), how far over
+    /// the camera a roof is looked for, and how many columns a frame.
+    const ACROSS: usize = 36;
+    const OVER: f32 = 22.0;
+    const EACH: usize = 48;
+
+    fn look(&mut self, terrain: &Terrain, eye: Vec3) {
+        let middle = (eye.xz() * 2.0).floor().as_ivec2() - IVec2::splat(Self::ACROSS as i32 / 2);
+        if (middle - self.corner).abs().max_element() > 4 {
+            *self = Cover { corner: middle, ..default() };
+        }
+        for _ in 0..Self::EACH {
+            let (i, j) = (self.next % Self::ACROSS, self.next / Self::ACROSS);
+            let (x, z) = ((self.corner.x + i as i32) as f32 * 0.5 + 0.25, (self.corner.y + j as i32) as f32 * 0.5 + 0.25);
+            let ground = terrain.ground(x, z);
+            // Down from well over the camera, a half metre at a time: a crown is thicker.
+            let from = eye.y + Self::OVER;
+            let steps = ((from - ground) / 0.5).max(0.0) as i32;
+            let top = (0..steps).map(|k| from - k as f32 * 0.5).find(|&y| terrain.0.get((Vec3::new(x, y, z) / CELL).floor().as_ivec3()).solid());
+            self.tops[self.next] = top.map_or(ground, |y| y + 0.25);
+            self.next = (self.next + 1) % self.tops.len();
+        }
+    }
+
+    /// The top of what is over a place, if it has been looked at.
+    fn top(&self, x: f32, z: f32) -> Option<f32> {
+        let at = (Vec2::new(x, z) * 2.0).floor().as_ivec2() - self.corner;
+        let inside = at.min_element() >= 0 && at.max_element() < Self::ACROSS as i32;
+        inside.then(|| self.tops[at.x as usize + at.y as usize * Self::ACROSS]).filter(|t| t.is_finite())
+    }
+}
+
+fn rain(time: Res<Time>, live: Option<Res<crate::motion::Live>>, breeze: Res<crate::world::Breeze>, cameras: Query<&GlobalTransform, With<Camera3d>>, terrain: Option<Res<Terrain>>, mut drops: Query<(&Drop, &mut Transform)>, mut cover: Local<Cover>) {
     let (Some(eye), Some(terrain), Some(live)) = (eye(&cameras), terrain, live) else { return };
     let (hard, snow) = crate::world::falling(live.0.when);
     let (t, dt) = (time.elapsed_secs(), time.delta_secs());
     let reach = Vec3::new(7.0, 5.0, 7.0);
+    if hard > 0.02 {
+        cover.look(&terrain, eye);
+    }
     for (drop, mut at) in &mut drops {
         let own = drop.0;
         // (The lightest rain is a seventh of them; none when it is dry.)
@@ -419,9 +472,12 @@ fn rain(time: Res<Time>, live: Option<Res<crate::motion::Live>>, breeze: Res<cra
         }
         let wrapped = Vec3::new((off.x + reach.x).rem_euclid(reach.x * 2.0) - reach.x, (off.y + reach.y).rem_euclid(reach.y * 2.0) - reach.y, (off.z + reach.z).rem_euclid(reach.z * 2.0) - reach.z);
         at.translation = eye + wrapped;
-        // (At the ground it is gone: it begins again at the top of the box.)
-        if at.translation.y < terrain.ground(at.translation.x, at.translation.z) {
-            at.translation.y = eye.y + reach.y;
+        // (At the ground, or whatever is over it, it is gone: under a crown or a roof none
+        // is seen, and it is seen again when it has gone round to above it.)
+        let top = cover.top(at.translation.x, at.translation.z).unwrap_or_else(|| terrain.ground(at.translation.x, at.translation.z));
+        if at.translation.y < top {
+            at.scale = Vec3::ZERO;
+            continue;
         }
         // (Not in the camera's face, as a speck is not.)
         let near = ((at.translation.distance(eye) - 0.8) / 1.0).clamp(0.0, 1.0);
