@@ -62,11 +62,16 @@ pub fn density(block: Block) -> f32 {
 /// tonne of birch). What is heavier is broken up and carried.
 pub const SHOVED: f32 = 200.0;
 
-/// Health a thing that lands on a body takes from it: by what it weighs and how fast it
-/// came, 400 at the most. A clod of 90 kg dropped half a metre is a bruise (9); a tonne and
-/// a half of trunk at ten metres a second kills.
+/// How fast a thing must come down to hurt anybody, metres a second: a drop of 0.8 m. What
+/// is set down, or settles as it is made (a log cut to hunks at the feet of whoever cut it),
+/// comes slower, and took health from them half the times they did either.
+pub const GENTLE: f32 = 4.0;
+
+/// Health a thing that lands on a body takes from it: by what it weighs and how much faster
+/// than [`GENTLE`] it came, 400 at the most. A clod of 90 kg dropped a metre and a half is a
+/// bruise (5); a tonne and a half of trunk at ten metres a second kills.
 pub fn harm(mass: f32, speed: f32) -> f32 {
-    (mass * speed / 50.0).min(400.0)
+    (mass * (speed - GENTLE).max(0.0) / 25.0).min(400.0)
 }
 
 /// How much of their walking pace someone keeps with this in their arms, of 1: all of it up
@@ -92,6 +97,8 @@ mod tests {
         // A cubic metre of leaf that comes down is nothing; of wood, a hard blow; of stone, death.
         let (leaf, wood, stone) = (harm(cubic(Block::Leaves), 8.0), harm(cubic(Block::Wood), 8.0), harm(cubic(Block::Stone), 8.0));
         assert!(leaf < 10.0 && (60.0..200.0).contains(&wood) && stone > 300.0, "{leaf} {wood} {stone}");
+        // What is set down or settles where it was made hurts nobody, whatever it weighs.
+        assert_eq!(harm(hunk(Block::Cobble), 2.5), 0.0);
         // A hunk of wood is carried at a walk; one of stone slower.
         assert_eq!(burden(hunk(Block::Billet)), 1.0);
         assert!((0.6..0.7).contains(&burden(hunk(Block::Cobble))), "{}", burden(hunk(Block::Cobble)));

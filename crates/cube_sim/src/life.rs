@@ -1068,9 +1068,10 @@ impl Sim {
             // (A tree, all along its trunk: by its size about where its top struck, it missed
             // whoever stood under its middle and struck whoever stood four metres to the
             // side of its crown.)
-            for (id, agent) in self.agents.iter().filter(|(_, a)| a.dead.is_none() && a.body.pos.distance(nearest(a.body.pos)) < wide + a.body.half + 0.4) {
+            let harm = crate::matter::harm(fallen.mass, fallen.speed);
+            for (id, agent) in self.agents.iter().filter(|(_, a)| harm > 0.0 && a.dead.is_none() && a.body.pos.distance(nearest(a.body.pos)) < wide + a.body.half + 0.4) {
                 let away = (agent.body.pos - nearest(agent.body.pos)).with_y(0.0).normalize_or(Vec3::X);
-                hits.push(Hit { on: *id, by: 0, harm: crate::matter::harm(fallen.mass, fallen.speed), push: away * 3.0 + Vec3::Y * 1.5, part: Part::Trunk });
+                hits.push(Hit { on: *id, by: 0, harm, push: away * 3.0 + Vec3::Y * 1.5, part: Part::Trunk });
             }
             self.loose.heard.push(fallen);
         }
