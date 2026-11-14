@@ -25,5 +25,5 @@ shot 5-hall-beam --hour 10.4 --script '1 stop' --after 8 --eye 23.5,14,85 --look
 shot 6-hall-torch --hour 13 --script "$walk" --after 26 --eye 16.5,13.8,76.5 --look 20.5,13.3,81
 shot 7-hall-first --hour 13 --script '0.5 torch first; 3 fwd walk; 23.2 stop' --after 26
 shot 8-hall-night --hour 23 --day 7 --script "$walk" --after 26 --eye 23.5,14,85 --look 19.5,13,80.5
-shot 9-way-out --hour 13 --script '1 stop' --after 8 --eye 20,13.6,83 --look 20,15.6,62
+shot 9-way-out --hour 13 --script '1 stop' --after 8 --eye 20,15.1,73.5 --look 20,16.2,56
 [ -n "$only" ] || ffmpeg -hide_banner -loglevel error -y -pattern_type glob -i 'shots/cave/[1-9]-*.png' -vf "scale=800:-1,tile=3x3" -frames:v 1 shots/cave.png

@@ -14,7 +14,10 @@ use crate::{
     player::Controlled,
     world::{Dirty, Terrain},
 };
-use bevy::prelude::*;
+use bevy::{
+    prelude::*,
+    render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension},
+};
 use cube_sim::terrain::SEA;
 use cube_voxel::{Block, CELL};
 
@@ -27,11 +30,19 @@ impl Plugin for CavePlugin {
 }
 
 /// How strong the sky's light is through the mouth and down the shaft at full day, lumens:
-/// some two thousand lux in the passage and a thousand on the hall's floor.
-const MOUTH: f32 = 4.0e6;
+/// some five thousand lux in the passage and a thousand on the hall's floor (the cave's
+/// stone is dark: at two thousand the passage was black to an eye inside).
+const MOUTH: f32 = 1.4e7;
 const SHAFT: f32 = 2.5e7;
 /// How much light a patch of full sun on the hall's floor gives back, lumens.
 const BOUNCE: f32 = 1.4e5;
+/// How much of the day spills onto the passage round its mouth, lumens.
+const SPILL: f32 = 5.0e5;
+/// How bright the beam is in the air, looked through from side to side, as the picture has it.
+const BEAM: f32 = 0.05;
+/// How bright the rock all round is in a room of the cave by day, as light to what is in it:
+/// a twentieth of what the open sky gives, to an eye that has opened four stops.
+const ROOM: f32 = 25.0;
 
 /// How far in the hall is from the mouth, and how much the ground must rise over that, metres.
 const IN: f32 = 24.0;
@@ -40,7 +51,20 @@ const RISE: f32 = 10.0;
 /// Where the cave is open to the sky, once it is dug: each opening as a point outside it and
 /// the way in from there.
 #[derive(Resource)]
-struct Open([(Vec3, Vec3, f32, f32); 2], Vec3);
+struct Open([(Vec3, Vec3, f32, f32); 2], Vec3, Vec<(Transform, Vec3)>, Vec3);
+
+/// The day spilling in at the mouth onto the passage's own walls and floor: the lamp outside
+/// shines along it and lights only what faces out.
+#[derive(Component)]
+struct Spill;
+
+/// The sun's beam down the shaft as it is seen in the air, and its share of the whole.
+#[derive(Component)]
+struct Beam(f32);
+
+/// A room of the cave, as what lights it from all round: not the sky.
+#[derive(Component)]
+struct Room;
 
 /// What comes back off the rock where the sun's beam lands: a hall with a patch of sun on
 /// its floor is not dark.
@@ -54,9 +78,10 @@ struct Skylight(usize);
 /// The sky's light through the mouth and down the shaft. The engine lights a thing from the
 /// whole sky or (`world::Roofed`) from none of it: it has no way to know that from here the
 /// sky is one bright hole. So each opening has a lamp outside it the colour of the sky,
-/// shining in, with shadows, as strong as the day is: what a cave's mouth is to whoever is
+/// shining in, with shadows, as strong as the day is (the mouth's reaching no further than the passage: through it,
+/// it lit a round patch of the hall's far wall that hung in the mouth like a ball): what a cave's mouth is to whoever is
 /// inside. (The sun's own beam down the shaft is the sun's, and the engine's.)
-fn daylight(mut commands: Commands, time: Res<Time>, players: Query<&Transform, With<Controlled>>, open: Option<Res<Open>>, live: Res<Live>, mut lamps: Query<(&Skylight, &mut SpotLight)>, mut bounces: Query<&mut PointLight, With<Bounce>>, roofed: Res<crate::world::Roofed>) {
+fn daylight(mut commands: Commands, time: Res<Time>, players: Query<&Transform, With<Controlled>>, open: Option<Res<Open>>, live: Res<Live>, mut lamps: Query<(&Skylight, &mut SpotLight)>, mut bounces: Query<&mut PointLight, (With<Bounce>, Without<Spill>)>, mut spills: Query<&mut PointLight, With<Spill>>, mut rooms: Query<&mut bevy::light::EnvironmentMapLight, With<Room>>, mut images: ResMut<Assets<Image>>, roofed: Res<crate::world::Roofed>, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>, beams: Query<(&Beam, &MeshMaterial3d<StandardMaterial>)>) {
     let Some(open) = open else { return };
     // (`CAVE_TRACE=1`: where the player is, every two seconds, for whoever sets a camera.)
     if std::env::var_os("CAVE_TRACE").is_some() && time.elapsed_secs() % 2.0 < time.delta_secs() {
@@ -65,16 +90,35 @@ fn daylight(mut commands: Commands, time: Res<Time>, players: Query<&Transform, 
     let day = cube_sim::sky::daylight(live.0.when);
     if lamps.is_empty() {
         for (n, &(from, to, lumens, wide)) in open.0.iter().enumerate() {
-            commands.spawn((Skylight(n), SpotLight { color: Color::srgb(0.72, 0.84, 1.0), intensity: lumens * day, range: 90.0, radius: 0.5, inner_angle: wide * 0.6, outer_angle: wide, shadow_maps_enabled: true, ..default() }, Transform::from_translation(from).looking_to(to, Vec3::Y)));
+            commands.spawn((Skylight(n), SpotLight { color: Color::srgb(0.72, 0.84, 1.0), intensity: lumens * day, range: if n == 0 { 26.0 } else { 90.0 }, radius: 0.5, inner_angle: wide * 0.6, outer_angle: wide, shadow_maps_enabled: true, ..default() }, Transform::from_translation(from).looking_to(to, Vec3::Y)));
         }
     }
     if bounces.is_empty() {
+        commands.spawn((Spill, PointLight { color: Color::srgb(0.78, 0.87, 1.0), intensity: 0.0, range: 11.0, radius: 0.6, shadow_maps_enabled: false, ..default() }, Transform::from_translation(open.3)));
+        // What is all round a thing in a cave is rock, a little lit, and not the sky: each
+        // room of it is a box in which the engine lights things from that and not from the
+        // sky over the hill (a light probe, the one way it has to say so by place; and it
+        // takes eight at most, so the rooms are few and square). Dim blue-grey, one colour.
+        let mut dim = Image::new_fill(Extent3d { width: 1, height: 1, depth_or_array_layers: 6 }, TextureDimension::D2, &[150, 185, 255, 255], TextureFormat::Rgba8UnormSrgb, bevy::asset::RenderAssetUsages::RENDER_WORLD);
+        dim.texture_view_descriptor = Some(TextureViewDescriptor { dimension: Some(TextureViewDimension::Cube), ..default() });
+        let dim = images.add(dim);
+        // The beam itself, seen in the cave's air: drawn, sixteen shafts of faint light one in
+        // the other, so that it has no edge, along the sun's line down to the patch. (The engine's lit mist shows
+        // nothing here at any thickness, tried to 0.3; why was not found.)
+        let from = open.0[1].1;
+        for (radius, share) in (1..=16).map(|k| (k as f32 * 0.08, 1.0 / 16.0)) {
+            let lit = materials.add(StandardMaterial { base_color: Color::BLACK, unlit: true, alpha_mode: AlphaMode::Add, fog_enabled: false, cull_mode: None, ..default() });
+            commands.spawn((Beam(share), Mesh3d(meshes.add(Cylinder::new(radius, 11.0))), MeshMaterial3d(lit), bevy::light::NotShadowCaster, Transform::from_translation(open.1 - from * 4.2).with_rotation(Quat::from_rotation_arc(Vec3::Y, -from))));
+        }
+        for &(place, falloff) in &open.2 {
+            commands.spawn((Room, bevy::light::LightProbe { falloff }, bevy::light::EnvironmentMapLight { diffuse_map: dim.clone(), specular_map: dim.clone(), intensity: 0.0, ..default() }, place));
+        }
         commands.spawn((Bounce, PointLight { color: Color::srgb(1.0, 0.86, 0.66), intensity: 0.0, range: 16.0, radius: 1.0, shadow_maps_enabled: false, ..default() }, Transform::from_translation(open.1)));
     }
-    // (Set for an eye that is inside and has opened. To one outside in the day they are an
-    // eighth as strong: at their full strength the passage glowed out of the hillside,
-    // brighter than the ground round its mouth.)
-    let seen = 0.12 + 0.88 * roofed.0;
+    // (Set for an eye that is inside and has opened four stops. To one outside in the day
+    // they are a sixth as strong: at their full strength the passage glowed out of the
+    // hillside, brighter than the ground round its mouth.)
+    let seen = 0.16 + 0.84 * roofed.0;
     for (lamp, mut light) in &mut lamps {
         light.intensity = open.0[lamp.0].2 * day * seen;
     }
@@ -82,8 +126,20 @@ fn daylight(mut commands: Commands, time: Res<Time>, players: Query<&Transform, 
     // patch it lights gives its light back to the hall.
     let down = cube_sim::sky::sun(live.0.when).normalize().dot(-open.0[1].1).max(0.0);
     let aligned = ((down - 0.9965) / 0.003).clamp(0.0, 1.0);
+    for mut light in &mut spills {
+        light.intensity = SPILL * day * seen;
+    }
+    for mut room in &mut rooms {
+        room.intensity = ROOM * day;
+    }
     for mut light in &mut bounces {
         light.intensity = BOUNCE * aligned * day;
+    }
+    for (beam, lit) in &beams {
+        if let Some(mut lit) = materials.get_mut(&lit.0) {
+            let glow = BEAM * beam.0 * aligned * day;
+            lit.base_color = Color::linear_rgb(glow, glow * 0.86, glow * 0.62);
+        }
     }
 }
 
@@ -320,7 +376,17 @@ fn dig(mut commands: Commands, args: Res<crate::Args>, loading: Res<crate::loadi
     terrain.touched(&mut dirty, changed);
     // The lamps of its two openings: six metres out from the mouth, and well up the line of
     // the shaft, so that neither is much stronger at its opening than at the hall's floor.
-    commands.insert_resource(Open([(at(-6.0, 0.0, 1.6), (ahead - Vec3::Y * 0.07).normalize(), MOUTH, 0.5), (top + to_sun * 14.0, -to_sun, SHAFT, 0.16)], foot - to_sun * 2.5 + Vec3::Y * 0.5));
+    commands.insert_resource(Open([(at(-6.0, 0.0, 1.6), (ahead - Vec3::Y * 0.07).normalize(), MOUTH, 0.5), (top + to_sun * 14.0, -to_sun, SHAFT, 0.16)], foot - to_sun * 2.5 + Vec3::Y * 0.5, {
+        // Its rooms: the passage from where the hill is over it, the hall, the gallery and
+        // its basin. Each a box square to the way in, with its edges eased into the next.
+        let turn = Quat::from_mat3(&Mat3::from_cols(left, Vec3::Y, ahead));
+        let room = |along: f32, aside: f32, up: f32, size: Vec3, falloff: Vec3| (Transform { translation: at(along, aside, up), rotation: turn, scale: size }, falloff);
+        vec![
+            room(13.5, 0.0, 0.5, Vec3::new(5.0, 4.4, 13.0), Vec3::new(0.1, 0.1, 0.45)),
+            room(IN + 1.8, -0.5, hall + 3.5, Vec3::new(16.5, 13.0, 17.5), Vec3::new(0.08, 0.08, 0.12)),
+            room(IN - 1.5, 13.5, hall + 0.75, Vec3::new(17.0, 8.0, 10.0), Vec3::new(0.12, 0.1, 0.1)),
+        ]
+    }, at(6.0, 0.0, 1.4)));
     // Where to start so as to walk straight in: five metres before the mouth, facing it
     // (a scene's player is put down a metre and a half east of `--at`, and `--yaw` 0 is north).
     let (start, hall) = (mouth - ahead * 5.0, at(IN, 0.0, hall + 1.0));

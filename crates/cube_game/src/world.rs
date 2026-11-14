@@ -353,7 +353,7 @@ fn spawn_sun(commands: &mut Commands, mediums: &mut Assets<ScatteringMedium>, im
     commands.spawn((Sun, DirectionalLight { illuminance: lux::RAW_SUNLIGHT, shadow_maps_enabled: true, ..default() }, shadows(), SunDisk { angular_size: SunDisk::EARTH.angular_size * 2.0, intensity: 1.0 }, VolumetricLight, DirectionalLightTexture { image: images.add(clouds()), tiled: true }));
     // Mist: thin lit air lying in the low ground and under the trees, so the sun comes
     // through the crowns in shafts and far woods stand in haze. Low, so the sky stays clear.
-    commands.spawn((FogVolume { density_factor: 0.0011, scattering: 0.4, absorption: 0.0, light_tint: Color::srgb(1.0, 0.95, 0.86), ..default() }, Transform::from_xyz(0.0, SEA as f32 * CELL + 11.0, 0.0).with_scale(Vec3::new(800.0, 24.0, 800.0))));
+    commands.spawn((Mist, FogVolume { density_factor: 0.0011, scattering: 0.4, absorption: 0.0, light_tint: Color::srgb(1.0, 0.95, 0.86), ..default() }, Transform::from_xyz(0.0, SEA as f32 * CELL + 11.0, 0.0).with_scale(Vec3::new(800.0, 24.0, 800.0))));
     commands.spawn((Moon, DirectionalLight { illuminance: 0.0, shadow_maps_enabled: false, color: Color::srgb(0.62, 0.74, 1.0), ..default() }, shadows()));
 }
 
@@ -381,6 +381,11 @@ fn by_height(table: &[(f32, f32)], sun_up: f32) -> f32 {
 /// the sky round it is far brighter than anything it lights, and an exposure set for the
 /// land alone leaves a sunset white.
 const EXPOSURE: [(f32, f32); 8] = [(-0.24, NIGHT_EV), (-0.16, 4.0), (-0.105, 7.0), (-0.03, 10.8), (0.05, 12.2), (0.2, 12.4), (0.35, 13.4), (0.85, 14.4)];
+
+/// The land's own mist: the one body of air the sky thins and tints by the hour (a cave has
+/// its own, which is not the sky's to change).
+#[derive(Component)]
+struct Mist;
 
 /// How much of the sky is hidden from the eye by the land over it: 0 in the open, 1 in a cave
 /// (already eased: it changes over a second or two, as an eye takes to opening).
@@ -444,7 +449,7 @@ fn sky(
     mut moon: Query<(&mut Transform, &mut DirectionalLight), (With<Moon>, Without<Sun>)>,
     terrain: Option<Res<Terrain>>,
     mut cameras: Query<(&mut Exposure, &mut DistanceFog, &mut ColorGrading, &mut AtmosphereEnvironmentMapLight, Option<&mut bevy::light::EnvironmentMapLight>, &mut Bloom, &GlobalTransform)>,
-    mut mists: Query<&mut FogVolume>,
+    mut mists: Query<&mut FogVolume, With<Mist>>,
     torches: Query<(), With<crate::player::Torch>>,
     roofed: Res<Roofed>,
 ) {
