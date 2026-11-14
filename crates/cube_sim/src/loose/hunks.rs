@@ -54,22 +54,33 @@ pub(super) fn joined(world: &World, first: IVec3, holds: impl Fn(&World, IVec3) 
 
 /// Puts hunks down: as many as asked, at the first of the places given (each a lowest
 /// corner, with what it is ordered by) that have room. Says how many found room.
-pub(super) fn strew(world: &mut World, mut places: Vec<(f32, IVec3)>, many: usize, block: Block, changed: &mut HashSet<IVec3>) -> usize {
+///
+/// `apart`: none of them beside another put with it, while there are places for that. The
+/// hunks of a split log lay end to end as the log had, and looked like the log still: "they
+/// should be spaced out a bit vs continuous (like they've been chopped into pieces)", the
+/// developer, 2026-11-14. Hunks lie on squares of their own size, so apart is a square between.
+pub(super) fn strew(world: &mut World, mut places: Vec<(f32, IVec3)>, many: usize, block: Block, apart: bool, changed: &mut HashSet<IVec3>) -> usize {
     places.sort_by(|a, b| a.0.total_cmp(&b.0).then_with(|| (a.1.y, a.1.z, a.1.x).cmp(&(b.1.y, b.1.z, b.1.x))));
-    let mut put = 0;
-    for (_, corner) in places {
-        if put == many {
-            break;
-        }
-        if hunk().all(|d| room(world, corner + d)) {
-            for d in hunk() {
-                world.set(corner + d, block);
-                changed.insert((corner + d).div_euclid(IVec3::splat(cube_voxel::CHUNK)));
+    let mut put: Vec<IVec3> = Vec::new();
+    for spaced in if apart { [true, false].iter() } else { [false].iter() } {
+        for (_, corner) in &places {
+            if put.len() == many {
+                break;
             }
-            put += 1;
+            let beside = |c: &IVec3| (*c - *corner).abs().cmple(IVec3::new(HUNK, HUNK - 1, HUNK)).all();
+            if *spaced && put.iter().any(beside) {
+                continue;
+            }
+            if hunk().all(|d| room(world, *corner + d)) {
+                for d in hunk() {
+                    world.set(*corner + d, block);
+                    changed.insert((*corner + d).div_euclid(IVec3::splat(cube_voxel::CHUNK)));
+                }
+                put.push(*corner);
+            }
         }
     }
-    put
+    put.len()
 }
 
 /// Sets one hunk down at a place: on the square it is over, at that height or the least
@@ -78,7 +89,7 @@ pub(super) fn set_down(world: &mut World, at: Vec3, block: Block, changed: &mut 
     let cell = (at / CELL).floor().as_ivec3();
     let (x, z) = (cell.x.div_euclid(HUNK) * HUNK, cell.z.div_euclid(HUNK) * HUNK);
     let corner = (0..=3 * HUNK).map(|up| IVec3::new(x, cell.y + up, z)).find(|c| hunk().all(|d| room(world, *c + d)))?;
-    strew(world, vec![(0.0, corner)], 1, block, changed);
+    strew(world, vec![(0.0, corner)], 1, block, false, changed);
     Some(corner)
 }
 

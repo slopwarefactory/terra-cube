@@ -517,12 +517,13 @@ impl Loose {
             let (low, high) = log.cells.keys().fold((IVec3::MAX, IVec3::MIN), |(l, h), c| (l.min(*c), h.max(*c)));
             let middle = (low + high + 1).as_vec3() * CELL / 2.0;
             let (a, b) = (log.now(middle.with_x(low.x as f32 * CELL)), log.now(middle.with_x((high.x + 1) as f32 * CELL)));
-            let mut places: Vec<(f32, IVec3)> = log.placed.iter().flat_map(|c| [0, -1].map(|down| IVec3::new(c.x.div_euclid(HUNK) * HUNK, c.y + down, c.z.div_euclid(HUNK) * HUNK))).collect::<HashSet<_>>().into_iter().map(|corner| (from_line((corner.as_vec3() + HUNK as f32 * 0.5) * CELL, a, b), corner)).collect();
+            // (And the squares beside those, so that there are places apart from each other.)
+            let mut places: Vec<(f32, IVec3)> = log.placed.iter().flat_map(|c| [0, -1].map(|down| IVec3::new(c.x.div_euclid(HUNK) * HUNK, c.y + down, c.z.div_euclid(HUNK) * HUNK))).flat_map(|c| [IVec3::ZERO, IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z].map(|d| c + d * HUNK)).collect::<HashSet<_>>().into_iter().map(|corner| (from_line((corner.as_vec3() + HUNK as f32 * 0.5) * CELL, a, b), corner)).collect();
             places.sort_by(|x, y| x.0.total_cmp(&y.0).then_with(|| (x.1.y, x.1.z, x.1.x).cmp(&(y.1.y, y.1.z, y.1.x))));
             // (Two from a small log and three from a large, `SPLITS`: large is three cells
             // thick, a great tree's, which is more than sixty cells of it.)
             let many = SPLITS[(log.cells.len() > 60) as usize];
-            let put = strew(world, places, many, Block::Billet, &mut cut.changed);
+            let put = strew(world, places, many, Block::Billet, true, &mut cut.changed);
             for k in 0..6 {
                 self.shed.push((a.lerp(b, (k as f32 + 0.5) / 6.0) + Vec3::Y * 0.3, Block::Timber));
             }
@@ -698,7 +699,7 @@ impl Loose {
             let many = (stone as f32 / (SPLIT * SPLIT * SPLIT * HUNK * HUNK * HUNK) as f32).round() as usize;
             let middle = lump.now(lump.pivot);
             let places: Vec<(f32, IVec3)> = lump.placed.iter().map(|c| IVec3::new(c.x.div_euclid(HUNK) * HUNK, c.y, c.z.div_euclid(HUNK) * HUNK)).collect::<HashSet<_>>().into_iter().map(|corner| (corner.y as f32 * 8.0 + ((corner.as_vec3() + HUNK as f32 * 0.5) * CELL - middle).with_y(0.0).length(), corner)).collect();
-            let put = strew(world, places, many, Block::Cobble, &mut cut.changed);
+            let put = strew(world, places, many, Block::Cobble, false, &mut cut.changed);
             for k in 0..4 {
                 self.shed.push((middle + Vec3::new(k as f32 * 0.15 - 0.2, 0.2, 0.0), Block::Shard));
             }
@@ -725,7 +726,7 @@ impl Loose {
         let own: HashSet<IVec3> = body.iter().copied().collect();
         let stone = emptied(world, lo, hi, |b| b == Block::Shard, |p| own.contains(&(p / CELL).floor().as_ivec3()), &mut cut.changed);
         let many = (stone as f32 / (SPLIT * SPLIT * SPLIT * HUNK * HUNK * HUNK) as f32).round() as usize;
-        let put = strew(world, places, many, Block::Cobble, &mut cut.changed);
+        let put = strew(world, places, many, Block::Cobble, false, &mut cut.changed);
         for k in 0..4 {
             self.shed.push((middle + Vec3::new(k as f32 * 0.15 - 0.2, 0.2, 0.0), Block::Shard));
         }
@@ -791,7 +792,7 @@ impl Loose {
                     }
                 }
             }
-            let mut put = if held > 0 { strew(world, places, many, Block::Cobble, &mut cut.changed) } else { 0 };
+            let mut put = if held > 0 { strew(world, places, many, Block::Cobble, true, &mut cut.changed) } else { 0 };
             // (A small stone lies half in the ground and no hunk's place within it is all
             // free: what found no place among them is set down where it lay, on what is
             // there. In the game a stone of 30 to 70 cm broke into nothing, 2026-11-13.)
