@@ -339,6 +339,64 @@ impl Loose {
         if began.elapsed().as_millis() >= 8 {
             trace(format_args!("loosen: {:.0} ms looking at {:?} cells, {} looked through", began.elapsed().as_secs_f32() * 1000.0, hi - lo + 1, seen.len()));
         }
+        changed.extend(self.sag(world, lo, hi, push));
+        changed
+    }
+
+    /// A tree that lies felled, with ground under one end of its trunk only, comes down. By
+    /// the rule above anything joined to the ground is held, and a trunk with its butt on
+    /// the rim of a pit dug under the rest of it hung out over the pit for good (a test of
+    /// this passed or failed by which way its tree happened to fall, 2026-11-14). What lies
+    /// under the trunk is asked along it; held on one side of its middle only, or nowhere,
+    /// all of it is taken loose as the tree it is, and comes to rest again.
+    fn sag(&mut self, world: &mut World, lo: IVec3, hi: IVec3, push: Vec3) -> HashSet<IVec3> {
+        let mut changed = HashSet::new();
+        let lying: Vec<usize> = (0..self.things.len()).filter(|n| { let t = &self.things[*n]; t.lies.is_some() && t.felled && !t.cells && !t.limbed && !t.limbs.is_empty() && !self.pieces.iter().any(|p| p.of() == Some(t.id)) }).collect();
+        for n in lying {
+            let thing = &self.things[n];
+            let (Some((pivot, shift, turn)), Some(trunk)) = (thing.lies, thing.limbs.iter().find(|l| l.roots > 0).or(thing.limbs.first())) else { continue };
+            let lain = |p: Vec3| pivot + shift + turn * (p - pivot);
+            let (a, b) = (lain(trunk.a.lerp(trunk.b, 0.15)), lain(trunk.b));
+            // (Only one the ground was changed near.)
+            let (low, high) = ((a.min(b) / CELL).floor().as_ivec3() - 4, (a.max(b) / CELL).floor().as_ivec3() + 4);
+            if low.cmpgt(hi).any() || high.cmplt(lo).any() {
+                continue;
+            }
+            let thick = trunk.ra.max(trunk.rb);
+            let held: Vec<f32> = (0..=12).map(|k| k as f32 / 12.0).filter(|along| {
+                let p = a.lerp(b, *along);
+                let under = ((p - Vec3::Y * thick) / CELL).floor().as_ivec3();
+                (1..=3).any(|down| { let there = world.get(under - IVec3::Y * down); there.solid() && !there.whole() && !there.foliage() })
+            }).collect();
+            let (first, last) = (held.iter().copied().fold(f32::MAX, f32::min), held.iter().copied().fold(f32::MIN, f32::max));
+            if !held.is_empty() && first < 0.5 && last > 0.5 {
+                continue;
+            }
+            // Its cells: the whole wood about where it lies.
+            let cut = ((crate::plants::Limb::UNDER + 0.9) / (trunk.b.y - trunk.a.y).max(0.1)).min(0.8);
+            let reach = thing.limbs.iter().flat_map(|l| [lain(l.a), lain(l.b)]).chain(thing.clumps.iter().map(|c| lain(c.middle))).fold((Vec3::MAX, Vec3::MIN), |(l, h), p| (l.min(p), h.max(p)));
+            let (from, to) = ((reach.0 / CELL).floor().as_ivec3() - 4, (reach.1 / CELL).floor().as_ivec3() + 4);
+            let mut own = Vec::new();
+            for y in from.y..=to.y {
+                for z in from.z..=to.z {
+                    for x in from.x..=to.x {
+                        let c = IVec3::new(x, y, z);
+                        let there = world.get(c);
+                        // (Not its stump, which stands where it grew and is whole wood beside its butt.)
+                        let at = (c.as_vec3() + 0.5) * CELL;
+                        let stump = from_line(at, trunk.a, trunk.a.lerp(trunk.b, cut)) < trunk.ra.max(trunk.rb) * 2.6 + CELL;
+                        if there.wood() && there.whole() && !stump && thing.lain_about(at) {
+                            own.push(c);
+                        }
+                    }
+                }
+            }
+            if own.is_empty() {
+                continue;
+            }
+            trace(format_args!("sag: tree {} lies held at {held:.2?} of its trunk, and comes down: {} cells", thing.id, own.len()));
+            changed.extend(self.take(world, own, push));
+        }
         changed
     }
 
@@ -735,7 +793,9 @@ impl Loose {
             // there until its weight is over what it rests on (a touch to either side of its
             // middle, or three with one right under it), three times at the most. (Stopped at its first
             // touch, a lump of rubble stood on a corner.)
-            if piece.keeps && piece.age < 20.0 {
+            // (And a tree come loose again as it lies, the ground gone from under it: held at
+            // its butt on the rim of a pit, it goes over that rim into it.)
+            if (piece.keeps || piece.thing.is_some() && piece.over.is_none()) && piece.age < 20.0 {
                 let weight = piece.now(piece.feel.iter().sum::<Vec3>() / piece.feel.len().max(1) as f32);
                 let touches: Vec<Vec3> = piece.feel.iter().copied().filter(|p| { let at = piece.now(*p) - Vec3::Y * 0.08; let b = world.bit((at / BIT).floor().as_ivec3()); bears(b) || b == Block::Rock }).collect();
                 let off = |p: &Vec3| (piece.now(*p) - weight).with_y(0.0);
