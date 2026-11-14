@@ -275,6 +275,13 @@ fn clear_way(world: &World, agent: &Agent, step: f32, to: Vec2) -> f32 {
 fn steer(world: &World, agent: &Agent, speed: f32, want: Vec2, nerve: Nerve, veer: &mut f32) -> (Vec2, bool) {
     let body = &agent.body;
     let (pos, level) = (flat(body.pos), cell_of(body.pos.y + 0.01));
+    // Where the ground is drawn lower than its cells a body stands down in them (it stands on
+    // the ground as it is drawn, in blocks of up to a metre on a steep hillside): then the way
+    // on is from the top of the cells it stands in, and out of a notch deeper than it steps it
+    // jumps. (Looked for from its feet, every way round was a wall three cells high: a fox
+    // that ran into such a notch stood in it for the rest of the day, `boxed-in`, seed 5.)
+    let sunk = (0..6).take_while(|up| world.get(IVec3::new(cell_of(pos.x), level + up, cell_of(pos.y))).ground()).count() as i32;
+    let level = level + sunk;
     let look = body.half + 0.3 + speed * 0.15;
     // Already swimming, water is no bar: it has to get out somewhere.
     let passes = |found: &Footing| matches!(found, Footing::Floor(_)) || body.swimming && matches!(found, Footing::Deep);
@@ -286,9 +293,9 @@ fn steer(world: &World, agent: &Agent, speed: f32, want: Vec2, nerve: Nerve, vee
         let mut ok = [first + side, first - side].iter().all(|p| passes(&footing(world, cell_of(p.x), cell_of(p.y), level, body.height, nerve)));
         // And the body itself, which is a box: it must be able to move, at its own level or
         // up what it will climb, along at least one of the axes this way mostly runs.
-        let free = |by: Vec3| (0..=nerve.up).any(|up| !body.blocked(world, body.pos + by + Vec3::Y * (up as f32 * CELL))) || body.swimming;
+        let free = |by: Vec3| (0..=nerve.up + sunk).any(|up| !body.blocked(world, body.pos + by + Vec3::Y * (up as f32 * CELL))) || body.swimming;
         ok &= (dir.x.abs() > 0.35 && free(Vec3::X * dir.x.signum() * 0.1)) || (dir.y.abs() > 0.35 && free(Vec3::Z * dir.y.signum() * 0.1));
-        let (mut at, mut jump) = (level, false);
+        let (mut at, mut jump) = (level, sunk > nerve.step);
         let mut out = body.half + 0.25;
         let mut last = (cell_of(pos.x), cell_of(pos.y));
         while ok && out <= look + 0.5 {

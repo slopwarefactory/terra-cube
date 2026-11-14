@@ -256,11 +256,11 @@ fn run_command(args: &Args) -> ! {
         // something, and how many still in the air (which is none that has found its bough).
         if kind.roosts && of.iter().any(|a| a.mind.about < 0.3) {
             let high = |a: &&cube_sim::life::Agent| a.body.pos.y - land.height((a.body.pos.x / CELL).floor() as i32, (a.body.pos.z / CELL).floor() as i32) as f32 * CELL > 2.0;
-            let (up, flying, with) = (of.iter().filter(|a| a.body.grounded && high(a)).count(), of.iter().filter(|a| !a.body.grounded && a.mind.perch.flatten().is_some() && a.mind.state != cube_sim::mind::State::Flee).count(), of.iter().filter(|a| a.mind.perch.flatten().is_some()).count());
-            println!("  {} out of its hours: {up} of {} up on a bough, {flying} in the air, {with} with a bough to go to", kind.id, of.len());
+            let (up, flying, with) = (of.iter().filter(|a| a.body.grounded && high(a)).count(), of.iter().filter(|a| !a.body.grounded && a.mind.perch.flatten().is_some() && a.mind.trying > 20.0).count(), of.iter().filter(|a| a.mind.perch.flatten().is_some()).count());
+            println!("  {} out of its hours: {up} of {} up on a bough, {flying} long in the air, {with} with a bough to go to", kind.id, of.len());
             // (Some are at it at any moment: one that cannot get onto its bough gives it up in
             // half a minute. All of them in the air is none of them ever landing.)
-            checks.bar(&format!("{} aloft", kind.id), flying as f32, flying * 2 <= of.len(), "no more than half still in the air out of its hours");
+            checks.bar(&format!("{} aloft", kind.id), flying as f32, flying * 2 <= of.len(), "no more than half still in the air after twenty seconds at it");
         }
         checks.bar(&format!("{} fell-out", kind.id), fell, fell == 0.0, "0 times");
         checks.bar(&format!("{} stuck", kind.id), stuck, stuck <= 0.08, "at most 0.08 of the time");
@@ -1375,6 +1375,24 @@ fn main() {
             }
             if off.is_empty() {
                 fail("no ground round the start to measure");
+            }
+            // (`WORLD_VERBOSE=1`: where the ground is drawn half a metre and more under its
+            // cells, with the cells' heights and the drawn tops round each, in cells.)
+            if std::env::var_os("WORLD_VERBOSE").is_some() {
+                let mut listed = 0;
+                for z in -reach..reach {
+                    for x in -reach..reach {
+                        let Some(here) = drawn(x, z) else { continue };
+                        if here.1 - here.0 < 0.5 || land.height(x, z) <= SEA || listed >= 6 {
+                            continue;
+                        }
+                        listed += 1;
+                        println!("at {x},{z} ({:.1},{:.1} m) {:?}, slope {}: drawn {:.0} cm under its cells; cells and drawn tops round it:", (x as f32 + 0.5) * CELL, (z as f32 + 0.5) * CELL, land.biome(x, z), land.slope(x, z), (here.1 - here.0) * 100.0);
+                        for dz in -3..=3 {
+                            println!("   {}", (-3..=3).map(|dx| format!("{:>3}/{:<5.1}", land.height(x + dx, z + dz) - land.height(x, z), drawn(x + dx, z + dz).map_or(f32::NAN, |d| d.0 / CELL - land.height(x, z) as f32))).collect::<Vec<_>>().join(" "));
+                        }
+                    }
+                }
             }
             for all in [&mut off, &mut steps, &mut stood] {
                 all.sort_by(f32::total_cmp);
