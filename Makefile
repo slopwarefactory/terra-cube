@@ -184,7 +184,7 @@ feet: ## no window: the player and a deer walked over a hillside with feet as th
 	@tools/feet.sh player -60,20 2.0
 	@tools/feet.sh deer 30,-40 0.5
 
-cave: ## no window: shots/cave.png, light under the ground on one sheet: a cave dug into a hillside (--cave), by day, with the sun down its shaft, by torch and at night; look after any change to exposure, the sky's fill or the torch
+cave: ## no window: shots/cave.png, light under the ground on one sheet: a cave dug into a hillside (--cave), by day, with the sun down the hole in its roof, by torch, and at night by a torch and by a fire; look after any change to exposure, the sky's fill or the torch
 	@tools/cave.sh
 
 sky: ## no window: shots/sky.png, the sky and the light at twenty fixed hours and places (dawn to full night, the clouds, the torch, a wood, a lake), one sheet; look after any change to sky, sun, moon, cloud, exposure or a light (tools/sky.sh dusk for one)

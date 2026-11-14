@@ -396,6 +396,8 @@ pub struct Roofed(pub f32);
 /// shaft from the sky is then too bright to look at, as it is. (At five the patch of sun on
 /// a cave's floor was white with nothing in it.)
 const CAVE_EV: f32 = 10.5;
+/// How many stops a flame under rock shuts the eye from the open night's.
+const FIRELIT: f32 = 1.5;
 /// How much of the sky's fill still shows under a roof of rock, as it looks in the picture.
 /// (At a twentieth, the shadows a torch threw in a cave by day were blue.)
 const CAVE_SKY: f32 = 0.025;
@@ -450,7 +452,7 @@ fn sky(
     terrain: Option<Res<Terrain>>,
     mut cameras: Query<(&mut Exposure, &mut DistanceFog, &mut ColorGrading, &mut AtmosphereEnvironmentMapLight, Option<&mut bevy::light::EnvironmentMapLight>, &mut Bloom, &GlobalTransform)>,
     mut mists: Query<&mut FogVolume, With<Mist>>,
-    torches: Query<(), With<crate::player::Torch>>,
+    torches: Query<(), Or<(With<crate::player::Torch>, With<crate::cave::Fire>)>>,
     roofed: Res<Roofed>,
 ) {
     let _slow = crate::Slow::new("sky");
@@ -545,6 +547,12 @@ fn sky(
     let toward = Vec3::new(1.0, 0.86, 0.62).lerp(Vec3::new(1.0, 0.62, 0.4), low).lerp(clouded, grey);
     for (mut exposure, mut fog, mut grade, mut skylight, filled, mut bloom, eye) in &mut cameras {
         exposure.ev100 = exposed(to_sun.y, roofed.0);
+        // By a flame under rock at night the eye is shut a stop and a half from the open
+        // night's, as it is for the flame: what is near it is seen well and what is far
+        // from it is dark, where with the eye wide open a torch lit a whole hall evenly.
+        if fire {
+            exposure.ev100 = exposure.ev100.max(NIGHT_EV + FIRELIT * roofed.0);
+        }
         // What has a light of its own (a flame, the moon, a firefly) has more of a glow
         // round it in the dark, as to an eye opened for it.
         bloom.intensity = 0.06 + 0.1 * (1.0 - day);

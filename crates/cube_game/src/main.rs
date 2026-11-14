@@ -109,6 +109,8 @@ pub struct Args {
     pub torch: bool,
     /// A scene's camera put at one point and looking at another, whatever the view (`--eye`).
     pub eye: Option<(Vec3, Vec3)>,
+    /// A fire burns in the cave's hall (`cave::Fire`).
+    pub fire: bool,
     /// A cave is dug into the hillside ahead of where the player starts (`cave`).
     pub cave: bool,
     /// The player starts with a hunk of wood in his hands (to try F on, with real keys).
@@ -204,7 +206,8 @@ cargo sandbox --scene FILE --play [--as ID] [--after SECONDS] [--view first] [--
                                         and distance: a tree he cuts seen coming down (in a wood
                                         most sides have a trunk in the way: try a few)
         … --play --cave                 a cave dug into the nearest hillside to look at light in: a passage,
-                                        a hall with a shaft to the sky, a gallery and a pool (it prints where)
+                                        a hall with a hole to the sky, a gallery and a pool (it prints where);
+                                        --fire: with a fire burning in the hall
         … --play --eye X,Y,Z --look X,Y,Z   the camera at one point looking at another, metres, whatever the view
         … --view sky [--yaw 1.57] [--pitch 0.16]
                                         from over the trees looking out and a little up, wide: the
@@ -302,6 +305,7 @@ fn parse_args() -> Args {
             "--speed" => args.speed = it.next().and_then(|v| v.parse().ok()).unwrap_or(1.0),
             "--torch" => args.torch = true,
             "--cave" => args.cave = true,
+            "--fire" => args.fire = true,
             "--eye" => {
                 // `--eye X,Y,Z --look X,Y,Z`: where the camera is and what it looks at, metres.
                 let point = |v: Option<String>| v.map(|v| v.split(',').filter_map(|n| n.parse::<f32>().ok()).collect::<Vec<_>>()).filter(|p| p.len() == 3).map(|p| Vec3::new(p[0], p[1], p[2]));

@@ -1,7 +1,6 @@
 //! A cave to look at light in (`--cave`): the land is a height map and has none of its own, so
-//! one is dug into the hillside nearest where the player starts, by the same cuts and puts a
-//! shovel and a hand make (`cube_sim::loose`), so it is in the journal like any digging and
-//! the world is still its seed and its journal. A passage in, a hall with a shaft up to the
+//! one is cut into the hillside nearest where the player starts, straight into the cells (what
+//! stands in it is put by a hand's puts, `cube_sim::loose`; the cutting is not in the journal). A passage in, a hall with a shaft up to the
 //! sky, a low gallery to one side with a pool; stone standing on the floor and hanging from
 //! the roof, rubble, moss and mushrooms. Nothing here is a rule of the game: it is a set for
 //! pictures, until the land has caves of its own (docs/engine.md, "Not yet").
@@ -25,7 +24,7 @@ pub struct CavePlugin;
 
 impl Plugin for CavePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (dig, daylight));
+        app.add_systems(Update, (dig, daylight, burn));
     }
 }
 
@@ -33,7 +32,7 @@ impl Plugin for CavePlugin {
 /// some five thousand lux in the passage and a thousand on the hall's floor (the cave's
 /// stone is dark: at two thousand the passage was black to an eye inside).
 const MOUTH: f32 = 1.4e7;
-const SHAFT: f32 = 2.5e7;
+const SHAFT: f32 = 8.0e7;
 /// How much light a patch of full sun on the hall's floor gives back, lumens.
 const BOUNCE: f32 = 1.4e5;
 /// How much of the day spills onto the passage round its mouth, lumens.
@@ -51,7 +50,13 @@ const RISE: f32 = 10.0;
 /// Where the cave is open to the sky, once it is dug: each opening as a point outside it and
 /// the way in from there.
 #[derive(Resource)]
-struct Open([(Vec3, Vec3, f32, f32); 2], Vec3, Vec<(Transform, Vec3)>, Vec3);
+struct Open([(Vec3, Vec3, f32, f32); 2], Vec3, Vec<(Transform, Vec3)>, Vec3, Vec3);
+
+/// A fire on the hall's floor (`--fire`): its light, and whether it is the one that throws
+/// shadows. Ten times a torch, so that where a torch lights the ground round whoever holds
+/// it, a fire lights the hall.
+#[derive(Component)]
+pub struct Fire(bool);
 
 /// The day spilling in at the mouth onto the passage's own walls and floor: the lamp outside
 /// shines along it and lights only what faces out.
@@ -102,11 +107,11 @@ fn daylight(mut commands: Commands, time: Res<Time>, players: Query<&Transform, 
         let mut dim = Image::new_fill(Extent3d { width: 1, height: 1, depth_or_array_layers: 6 }, TextureDimension::D2, &[150, 185, 255, 255], TextureFormat::Rgba8UnormSrgb, bevy::asset::RenderAssetUsages::RENDER_WORLD);
         dim.texture_view_descriptor = Some(TextureViewDescriptor { dimension: Some(TextureViewDimension::Cube), ..default() });
         let dim = images.add(dim);
-        // The beam itself, seen in the cave's air: drawn, sixteen shafts of faint light one in
+        // The beam itself, seen in the cave's air: drawn, forty shafts of faint light one in
         // the other, so that it has no edge, along the sun's line down to the patch. (The engine's lit mist shows
         // nothing here at any thickness, tried to 0.3; why was not found.)
         let from = open.0[1].1;
-        for (radius, share) in (1..=16).map(|k| (k as f32 * 0.08, 1.0 / 16.0)) {
+        for (radius, share) in (1..=40).map(|k| (k as f32 * 0.048, 1.0 / 40.0)) {
             let lit = materials.add(StandardMaterial { base_color: Color::BLACK, unlit: true, alpha_mode: AlphaMode::Add, fog_enabled: false, cull_mode: None, ..default() });
             commands.spawn((Beam(share), Mesh3d(meshes.add(Cylinder::new(radius, 11.0))), MeshMaterial3d(lit), bevy::light::NotShadowCaster, Transform::from_translation(open.1 - from * 4.2).with_rotation(Quat::from_rotation_arc(Vec3::Y, -from))));
         }
@@ -122,10 +127,10 @@ fn daylight(mut commands: Commands, time: Res<Time>, players: Query<&Transform, 
     for (lamp, mut light) in &mut lamps {
         light.intensity = open.0[lamp.0].2 * day * seen;
     }
-    // The sun is on the shaft's line for half an hour or so of the day; while it is, the
+    // The sun is on the shaft's line for an hour or so of the day; while it is, the
     // patch it lights gives its light back to the hall.
     let down = cube_sim::sky::sun(live.0.when).normalize().dot(-open.0[1].1).max(0.0);
-    let aligned = ((down - 0.9965) / 0.003).clamp(0.0, 1.0);
+    let aligned = ((down - 0.993) / 0.005).clamp(0.0, 1.0);
     for mut light in &mut spills {
         light.intensity = SPILL * day * seen;
     }
@@ -137,10 +142,58 @@ fn daylight(mut commands: Commands, time: Res<Time>, players: Query<&Transform, 
     }
     for (beam, lit) in &beams {
         if let Some(mut lit) = materials.get_mut(&lit.0) {
-            let glow = BEAM * beam.0 * aligned * day;
-            lit.base_color = Color::linear_rgb(glow, glow * 0.86, glow * 0.62);
+            // (Warm with the sun in it; without, the sky's own light coming down, cooler
+            // and three fifths as bright: the day pours in at every hour, not for one.)
+            let (sun, sky) = (BEAM * beam.0 * aligned * day, BEAM * beam.0 * 0.6 * day);
+            lit.base_color = Color::linear_rgb(sun + sky * 0.75, sun * 0.86 + sky * 0.86, sun * 0.62 + sky);
         }
     }
+}
+
+/// The fire's strength, lumens: what throws shadows, and what does not (the glow of the
+/// embers and of the rock round it).
+const FIRE: f32 = 26_000.0;
+const EMBERS: f32 = 2_500.0;
+
+/// Lights the fire once the cave is dug, and keeps it flickering.
+fn burn(mut commands: Commands, args: Res<crate::Args>, time: Res<Time>, open: Option<Res<Open>>, live: Res<Live>, roofed: Res<crate::world::Roofed>, mut fires: Query<(&Fire, &mut PointLight)>, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>) {
+    let Some(open) = open.filter(|_| args.fire) else { return };
+    if fires.is_empty() {
+        let cube = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+        let wood = materials.add(StandardMaterial { base_color: Color::srgb(0.12, 0.07, 0.04), perceptual_roughness: 0.9, ..default() });
+        // Logs laid across each other, and the flame over them in three cubes, as a torch's is.
+        for (at, size, turn) in [(Vec3::new(0.0, 0.1, 0.0), Vec3::new(0.9, 0.2, 0.2), 0.3f32), (Vec3::new(0.05, 0.1, 0.0), Vec3::new(0.2, 0.2, 0.9), -0.2), (Vec3::new(0.0, 0.28, 0.05), Vec3::new(0.7, 0.18, 0.18), 1.1)] {
+            commands.spawn((Mesh3d(cube.clone()), MeshMaterial3d(wood.clone()), Transform { translation: open.4 + at, rotation: Quat::from_rotation_y(turn), scale: size }));
+        }
+        for (at, size, colour, glow) in [(Vec3::new(0.0, 0.5, 0.0), 0.36, [1.0, 0.58, 0.2], 10.0), (Vec3::new(0.06, 0.78, -0.04), 0.24, [1.0, 0.46, 0.12], 8.0), (Vec3::new(-0.04, 0.98, 0.03), 0.14, [1.0, 0.36, 0.07], 5.0)] {
+            let colour = Color::srgb(colour[0], colour[1], colour[2]);
+            let lit = materials.add(StandardMaterial { base_color: colour, emissive: colour.to_linear() * glow, perceptual_roughness: 0.7, ..default() });
+            commands.spawn((Mesh3d(cube.clone()), MeshMaterial3d(lit), bevy::light::NotShadowCaster, Transform { translation: open.4 + at, scale: Vec3::splat(size), ..default() }));
+        }
+        let flame = |shadows: bool, range: f32| PointLight { color: Color::srgb(1.0, 0.52, 0.2), intensity: 0.0, range, radius: 0.15, shadow_maps_enabled: shadows, ..default() };
+        commands.spawn((Fire(true), flame(true, 60.0), Transform::from_translation(open.4 + Vec3::Y * 0.8)));
+        commands.spawn((Fire(false), flame(false, 12.0), Transform::from_translation(open.4 + Vec3::Y * 1.6)));
+    }
+    let t = time.elapsed_secs();
+    let waver = 1.0 + 0.12 * (t * 9.0).sin() + 0.07 * (t * 21.0 + 0.7).sin() + 0.05 * (t * 4.1).sin();
+    let seen = crate::player::seen(live.0.when, roofed.0);
+    for (fire, mut light) in &mut fires {
+        light.intensity = if fire.0 { FIRE } else { EMBERS } * waver * seen;
+    }
+}
+
+/// The rock's unevenness at a place, -1 to 1, rolling smoothly from one metre to the next:
+/// the same wherever it is asked from.
+fn uneven(p: Vec3) -> f32 {
+    let (cell, part) = (p.floor(), p - p.floor());
+    let ease = part * part * (Vec3::splat(3.0) - 2.0 * part);
+    let corner = |dx: i32, dy: i32, dz: i32| {
+        let c = cell.as_ivec3() + IVec3::new(dx, dy, dz);
+        roll((c.x.wrapping_mul(73_856_093) ^ c.y.wrapping_mul(19_349_663) ^ c.z.wrapping_mul(83_492_791)) as u32) * 2.0 - 1.0
+    };
+    let along = |dy: i32, dz: i32| corner(0, dy, dz) + (corner(1, dy, dz) - corner(0, dy, dz)) * ease.x;
+    let across = |dz: i32| along(0, dz) + (along(1, dz) - along(0, dz)) * ease.y;
+    across(0) + (across(1) - across(0)) * ease.z
 }
 
 /// A number from 0 to 1 for the nth thing strewn, the same every time.
@@ -205,22 +258,44 @@ fn dig(mut commands: Commands, args: Res<crate::Args>, loading: Res<crate::loadi
     let mut balls = Vec::new();
     // Every ball of the cave, set out first and cut afterwards.
     let mut cut = |_: &mut Terrain, _: &mut Live, middle: Vec3, radius: f32| balls.push((middle, radius));
-    // The passage: in from the hill's face, down a little, winding once it is in, wider and
-    // narrower; and a broad cut before it, so that whoever walks at it goes in.
-    for k in -4..=18 {
-        let k = k as f32;
-        let wind = (k * 0.45).sin() * 0.6 * ((k - 4.0) / 4.0).clamp(0.0, 1.0);
-        cut(&mut terrain, &mut live, at(k, wind, 1.3 - 0.07 * k.max(0.0)), if k < 2.0 { 2.1 } else { 1.6 + 0.25 * (k * 0.8).sin() });
+    // The passage: in from the hill's face and down a little. Not a bore: it bends, its
+    // walls are lumps and hollows (two smaller cuts to each half metre, each off to a side
+    // and up or down by its own chance), there is an alcove every few metres on one side or
+    // the other, and the roof goes up in two places. A straight line down its middle is
+    // clear all the same, for whoever walks in by a script. And a broad cut before it.
+    let bend = |k: f32| 0.8 * (k * 0.33 + 0.4).sin() * ((k - 3.0) / 4.0).clamp(0.0, 1.0);
+    let way = |k: f32| -0.14 * k.max(0.0);
+    for half in -8..=38 {
+        let k = half as f32 * 0.5;
+        cut(&mut terrain, &mut live, at(k, bend(k), way(k) + if k < 2.0 { 2.0 } else { 1.35 }), if k < 2.0 { 2.1 } else { 1.45 });
+        if k >= 3.0 {
+            for lobe in 0..2u32 {
+                let n = (half as u32) * 7 + lobe * 3;
+                cut(&mut terrain, &mut live, at(k, bend(k) + (roll(n) - 0.5) * 3.2, way(k) + 0.9 + roll(n + 1) * 2.0), 0.7 + roll(n + 2) * 0.75);
+            }
+        }
     }
-    // The hall, a floor lower than the passage and four times as high.
+    for (k, side, radius) in [(6.0, 1.0, 1.7), (10.5, -1.0, 2.0), (15.0, 1.0, 1.6)] {
+        cut(&mut terrain, &mut live, at(k, bend(k) + side * 2.3, way(k) + 1.2), radius);
+    }
+    for k in [8.5, 13.5] {
+        cut(&mut terrain, &mut live, at(k, bend(k) + 0.3, way(k) + 2.7), 1.5);
+    }
+    // The hall, lower than the passage and four times as high: a few great cuts, and
+    // twenty-odd small ones round them so that its walls are not the insides of balls.
     let hall = -1.6;
     for (along, aside, up, radius) in [(0.0, 0.0, 3.0, 4.6), (4.0, 1.5, 3.4, 4.2), (-2.5, -2.5, 2.6, 3.6), (2.0, -4.0, 2.8, 3.8), (6.5, -2.0, 2.4, 3.2), (1.0, 3.5, 2.2, 3.2), (3.0, 0.0, 6.0, 3.0)] {
         cut(&mut terrain, &mut live, at(IN + along, aside, hall + up), radius);
     }
-    // A shaft from its roof to the sky, along the line the sun is on at some hour today: a
-    // beam of the day comes down it then, onto the hall's floor. The hour is the one with
-    // the least rock to go through (a hill that faces north has the noon sun behind all of
-    // it); with none under forty-five metres it goes straight up, and there is no beam.
+    for n in 0..24u32 {
+        let (turn, far) = (roll(n * 11 + 400) * std::f32::consts::TAU, 3.5 + roll(n * 11 + 401) * 4.0);
+        cut(&mut terrain, &mut live, at(IN + 1.5 + turn.cos() * far, -0.5 + turn.sin() * far, hall + 0.6 + roll(n * 11 + 402) * 6.5), 0.9 + roll(n * 11 + 403) * 1.1);
+    }
+    // A hole in its roof to the sky, along the line the sun is on at some hour today: the
+    // day pours down it, and at that hour a beam of the sun with it, onto the hall's floor.
+    // The hour is the one with the least rock to go through (a hill that faces north has
+    // the noon sun behind all of it); with none under forty-five metres it goes straight
+    // up, and there is no beam. Wide, and no pipe: each cut of it off the line a little.
     let foot = at(IN + 2.0, 0.0, hall + 1.0);
     let over = |p: Vec3, terrain: &Terrain| p.y > terrain.ground(p.x, p.z) + 1.5;
     // (Out into the open, and with nothing in the way from there on: the first shaft came out
@@ -231,14 +306,18 @@ fn dig(mut commands: Commands, args: Res<crate::Args>, loading: Res<crate::loadi
         through(way, &terrain).map(|far| (far, hour, way))
     }).min_by(|a, b| a.0.total_cmp(&b.0));
     let (long, beam, to_sun) = beam.map_or((through(Vec3::Y, &terrain).unwrap_or(45.0), None, Vec3::Y), |(far, hour, way)| (far, Some(hour), way));
-    for k in 5..=long as i32 {
-        cut(&mut terrain, &mut live, foot + to_sun * k as f32, 1.5);
+    for k in 4..=long as i32 + 2 {
+        let n = k as u32 * 13 + 900;
+        let off = Vec3::new(roll(n) - 0.5, roll(n + 1) - 0.5, roll(n + 2) - 0.5) * 1.3;
+        cut(&mut terrain, &mut live, foot + to_sun * k as f32, 1.9);
+        cut(&mut terrain, &mut live, foot + to_sun * k as f32 + off, 1.6 + roll(n + 3) * 0.9);
     }
     let top = foot + to_sun * long;
     // A low gallery off to the left, going down to a basin.
     for k in 0..=9 {
         let k = k as f32;
         cut(&mut terrain, &mut live, at(IN + 1.0 - k * 0.3, 4.0 + k * 1.3, hall + 1.3 - 0.22 * k), 1.7 + 0.5 * (k * 0.9).sin().abs());
+        cut(&mut terrain, &mut live, at(IN + 1.0 - k * 0.3 + (roll(k as u32 * 3 + 700) - 0.5) * 2.0, 4.0 + k * 1.3, hall + 1.6 - 0.22 * k + roll(k as u32 * 3 + 701)), 0.9 + roll(k as u32 * 3 + 702) * 0.7);
     }
     let basin = at(IN - 2.0, 17.0, hall - 0.9);
     for (aside, radius) in [(0.0, 3.0), (2.2, 2.4), (-1.6, 2.2)] {
@@ -250,7 +329,7 @@ fn dig(mut commands: Commands, args: Res<crate::Args>, loading: Res<crate::loadi
         // reaches, and a metre round it, is made stone first where it is under the ground and
         // empty (the stone of a broken boulder, for the reason below). (Straight into the cells and not by the journal: a cave is a set, and a
         // region dropped and made again from its seed has the cuts and not this stone.)
-        let reach = Vec3::splat(radius + 1.0);
+        let reach = Vec3::splat(radius * 1.45 + 1.0);
         let (lo, hi) = (((middle - reach) / CELL).floor().as_ivec3(), ((middle + reach) / CELL).floor().as_ivec3());
         for z in lo.z..=hi.z {
             for x in lo.x..=hi.x {
@@ -264,13 +343,85 @@ fn dig(mut commands: Commands, args: Res<crate::Args>, loading: Res<crate::loadi
             }
         }
     }
+    // The cutting. Not ball by ball with a shovel's cut (`loose::cut`, as it first was): a
+    // ball on a grid of cells is rings of terraces, and a row of them a bore, "like they got
+    // hit with a railgun" (the developer, 2026-11-14). Each ball's reach is swelled and
+    // shrunk by up to two fifths, by a rolling unevenness of the rock itself that is the
+    // same for every ball that comes to a place: so the walls are lumps, ledges and hollows
+    // and no ball's outline is left. (Straight into the cells, as the fill is: not in the
+    // journal.)
     for &(middle, radius) in &balls {
-        changed.extend(live.0.loose.cut(&mut terrain.0, middle, radius, Vec3::Y, &[], None).changed);
-        // (And every chunk the ball reached is drawn again: a cut names only those in which
-        // something came loose.)
-        let reach = Vec3::splat(radius + 1.0 + CELL);
-        let (lo, hi) = (((middle - reach) / CELL).floor().as_ivec3().div_euclid(IVec3::splat(cube_voxel::CHUNK)), ((middle + reach) / CELL).floor().as_ivec3().div_euclid(IVec3::splat(cube_voxel::CHUNK)));
+        let reach = radius * 1.45 + CELL;
+        let (lo, hi) = (((middle - reach) / CELL).floor().as_ivec3(), ((middle + reach) / CELL).floor().as_ivec3());
+        for y in lo.y..=hi.y {
+            for z in lo.z..=hi.z {
+                for x in lo.x..=hi.x {
+                    let cell = IVec3::new(x, y, z);
+                    let p = (cell.as_vec3() + 0.5) * CELL;
+                    let far = p.distance(middle);
+                    if far < radius * 1.45 && far < radius * (1.0 + 0.3 * uneven(p * 0.55) + 0.14 * uneven(p * 1.7 + 31.0)) && terrain.0.get(cell).solid() {
+                        terrain.0.set(cell, Block::Air);
+                    }
+                }
+            }
+        }
+        let (lo, hi) = (lo.div_euclid(IVec3::splat(cube_voxel::CHUNK)), hi.div_euclid(IVec3::splat(cube_voxel::CHUNK)));
         changed.extend((lo.y..=hi.y).flat_map(|y| (lo.z..=hi.z).flat_map(move |z| (lo.x..=hi.x).map(move |x| IVec3::new(x, y, z)))));
+    }
+    // (And a plain way through the middle of the passage, whatever the rock did there: for
+    // whoever walks in by a script.)
+    for half in 0..=44 {
+        let (k, r) = (half as f32 * 0.5, 1.2);
+        let middle = at(k, 0.0, way(k).max(hall - 1.2) + 1.35);
+        let (lo, hi) = (((middle - r) / CELL).floor().as_ivec3(), ((middle + r) / CELL).floor().as_ivec3());
+        for y in lo.y..=hi.y {
+            for z in lo.z..=hi.z {
+                for x in lo.x..=hi.x {
+                    let cell = IVec3::new(x, y, z);
+                    if ((cell.as_vec3() + 0.5) * CELL).distance(middle) < r && terrain.0.get(cell).solid() {
+                        terrain.0.set(cell, Block::Air);
+                    }
+                }
+            }
+        }
+    }
+    // Floors. A cut is a ball, and a row of balls leaves a gutter for a floor and rings up
+    // the walls; a cave's floor is what has fallen and washed onto it. So the bottom of the
+    // passage and of the hall is filled to a level that steps by a cell here and there and
+    // banks up toward the walls. (Into air that has rock not far under it: not out over the
+    // hillside in front of the mouth.)
+    let mut lay = |terrain: &mut Terrain, p: Vec3, even: bool| {
+        let top = (p / CELL).floor().as_ivec3();
+        let rough = if !even && roll((top.x.div_euclid(3) * 73 + top.z.div_euclid(3) * 151) as u32) < 0.3 { 1 } else { 0 };
+        if (1..=10).all(|down| terrain.0.get(top - IVec3::Y * down) == Block::Air) {
+            return;
+        }
+        for y in (top.y - 10..=top.y + rough).rev() {
+            let cell = IVec3::new(top.x, y, top.z);
+            match terrain.0.get(cell) {
+                Block::Air => terrain.0.set(cell, Block::Shard),
+                _ => break,
+            }
+            changed.insert(cell.div_euclid(IVec3::splat(cube_voxel::CHUNK)));
+        }
+    };
+    for step in 4..=152 {
+        let k = step as f32 * 0.125;
+        for side in -26..=26 {
+            let off = side as f32 * 0.125;
+            // (Even where he walks, down the middle: a step of a cell stops a walker.)
+            let p = at(k, bend(k) + off, way(k) + 0.05 + 0.55 * (off.abs() - 1.0).max(0.0));
+            lay(&mut terrain, p + Vec3::Y * 0.2 * uneven(p.with_y(0.0) * 0.6), (bend(k) + off).abs() < 0.9);
+        }
+    }
+    for step in -56..=88 {
+        for side in -72..=64 {
+            let (along, aside) = (step as f32 * 0.125, side as f32 * 0.125);
+            // (A swell or two across it, so that it is no table.)
+            let swell = 0.3 * ((along * 0.45).sin() * (aside * 0.38 + 1.0).cos());
+            let p = at(IN + along, aside, hall - 1.2 + swell);
+            lay(&mut terrain, p + Vec3::Y * 0.3 * uneven(p.with_y(0.0) * 0.5), aside.abs() < 0.9);
+        }
     }
     // The land is drawn as ground: the top of each column, eased and stepped, with a riser
     // down to the column beside it. That has no way to draw a roof, or a floor under one (a
@@ -281,7 +432,7 @@ fn dig(mut commands: Commands, args: Res<crate::Args>, loading: Res<crate::loadi
     // it is: the hill over the cave is bare rock.
     let mut columns = std::collections::HashSet::new();
     for &(middle, radius) in &balls {
-        let reach = radius + 1.0;
+        let reach = radius * 1.45 + 1.0;
         let (lo, hi) = (((middle - reach) / CELL).floor().as_ivec3(), ((middle + reach) / CELL).floor().as_ivec3());
         for z in lo.z..=hi.z {
             for x in lo.x..=hi.x {
@@ -328,6 +479,10 @@ fn dig(mut commands: Commands, args: Res<crate::Args>, loading: Res<crate::loadi
     for n in 0..26u32 {
         let (turn, far) = (roll(n * 7) * std::f32::consts::TAU, 1.5 + roll(n * 7 + 1) * 6.0);
         let over = at(IN + 1.5 + turn.cos() * far, -0.5 + turn.sin() * far, hall + 3.0);
+        // (None in the way of whoever walks in down the middle.)
+        if (turn.sin() * far - 0.5).abs() < 1.4 && turn.cos() * far < 1.0 {
+            continue;
+        }
         let (Some(down), Some(above)) = (terrain.0.raycast(over, Vec3::NEG_Y, 8.0), terrain.0.raycast(over, Vec3::Y, 12.0)) else { continue };
         let (foot, roof) = (over - Vec3::Y * down, over + Vec3::Y * above);
         match n % 5 {
@@ -376,17 +531,21 @@ fn dig(mut commands: Commands, args: Res<crate::Args>, loading: Res<crate::loadi
     terrain.touched(&mut dirty, changed);
     // The lamps of its two openings: six metres out from the mouth, and well up the line of
     // the shaft, so that neither is much stronger at its opening than at the hall's floor.
-    commands.insert_resource(Open([(at(-6.0, 0.0, 1.6), (ahead - Vec3::Y * 0.07).normalize(), MOUTH, 0.5), (top + to_sun * 14.0, -to_sun, SHAFT, 0.16)], foot - to_sun * 2.5 + Vec3::Y * 0.5, {
+    commands.insert_resource(Open([(at(-6.0, 0.0, 1.6), (ahead - Vec3::Y * 0.14).normalize(), MOUTH, 0.5), (top + to_sun * 14.0, -to_sun, SHAFT, 0.2)], foot - to_sun * 2.5 + Vec3::Y * 0.5, {
         // Its rooms: the passage from where the hill is over it, the hall, the gallery and
         // its basin. Each a box square to the way in, with its edges eased into the next.
         let turn = Quat::from_mat3(&Mat3::from_cols(left, Vec3::Y, ahead));
         let room = |along: f32, aside: f32, up: f32, size: Vec3, falloff: Vec3| (Transform { translation: at(along, aside, up), rotation: turn, scale: size }, falloff);
         vec![
-            room(13.5, 0.0, 0.5, Vec3::new(5.0, 4.4, 13.0), Vec3::new(0.1, 0.1, 0.45)),
+            room(13.5, 0.0, -0.4, Vec3::new(7.5, 6.0, 13.0), Vec3::new(0.1, 0.1, 0.45)),
             room(IN + 1.8, -0.5, hall + 3.5, Vec3::new(16.5, 13.0, 17.5), Vec3::new(0.08, 0.08, 0.12)),
             room(IN - 1.5, 13.5, hall + 0.75, Vec3::new(17.0, 8.0, 10.0), Vec3::new(0.12, 0.1, 0.1)),
         ]
-    }, at(6.0, 0.0, 1.4)));
+    }, at(6.0, 0.0, 0.7), {
+        // Where a fire would be laid: on the hall's floor, off the way through it.
+        let over = at(IN + 5.0, 2.6, hall + 2.0);
+        over - Vec3::Y * terrain.0.raycast(over, Vec3::NEG_Y, 8.0).unwrap_or(3.0)
+    }));
     // Where to start so as to walk straight in: five metres before the mouth, facing it
     // (a scene's player is put down a metre and a half east of `--at`, and `--yaw` 0 is north).
     let (start, hall) = (mouth - ahead * 5.0, at(IN, 0.0, hall + 1.0));

@@ -810,7 +810,12 @@ fn torch(
     // given three quarters of what the eye has shut, so that at sunset it warms who holds it
     // and the ground at his feet, and by day (where it is given no more than at sunset) it
     // is a flame and no light.
-    let waver = waver * 2f32.powf(SEEN * crate::world::shut(live.0.when, roofed.0).min(11.0));
+    let waver = waver * seen(live.0.when, roofed.0);
+    // Under rock the lights that throw no shadow are a fifth of themselves: they are there
+    // for the open, where nothing gives a fire's light back, and in a cave they lit the far
+    // wall as much as the near and the hall was one flat orange. A torch's light is the
+    // torch's, and falls off with the square of the distance, as it does.
+    let soft = 1.0 - 0.8 * roofed.0;
     let stir = Vec3::new((t * 7.0).sin(), (t * 9.0).cos(), (t * 6.0).sin()) * 0.015;
     // The light that lights the way stands over the flame, not in it (see `LIFT`).
     let over = at + Vec3::Y * LIFT + stir;
@@ -845,9 +850,9 @@ fn torch(
     }
     for (_, ember, mut place, mut light) in &mut embers {
         (place.translation, light.intensity) = match ember {
-            Ember::Fill => (over, FILL * waver),
+            Ember::Fill => (over, FILL * waver * soft),
             Ember::Flame => (at + stir, EMBER * waver),
-            Ember::Bounce => (bounce, BOUNCE * waver),
+            Ember::Bounce => (bounce, BOUNCE * waver * soft),
         };
     }
 }
@@ -856,6 +861,13 @@ fn torch(
 /// in the sun, as a real one is.
 /// How much of the stops the eye has shut since night a flame's light is given back.
 const SEEN: f32 = 0.75;
+
+/// How many times its true strength a flame is given at this hour, under this much roof
+/// (`SEEN`): the torch's, and any fire's (`cave::Fire`), so that a stronger fire is as much
+/// stronger at every hour.
+pub(crate) fn seen(when: f32, roofed: f32) -> f32 {
+    2f32.powf(SEEN * crate::world::shut(when, roofed).min(11.0))
+}
 const TORCH: f32 = 2600.0;
 /// How far over the flame that light stands, metres. In the flame itself, a hand from the
 /// bearer's face and a man's height from the ground, it gave his face thirty times the light
