@@ -50,6 +50,33 @@ pub fn wind(when: f32) -> f32 {
     weather * (0.3 + 0.7 * gust)
 }
 
+/// How much of the sky is cloud, 0 (clear) to 1 (overcast): the same weather that drives the
+/// wind, so a blowing day is a clouded one, on a slower swell of its own, so there are clear
+/// spells of days and dull ones. It changes over hours, never in a moment.
+pub fn cloud(when: f32) -> f32 {
+    use std::f32::consts::TAU;
+    let front = 0.5 + 0.25 * (when * TAU * 0.37 + 0.8).sin() + 0.2 * (when * TAU * 0.13 + 1.7).sin() + 0.15 * (when * TAU * 1.9 + 2.0).sin();
+    let t = ((front - 0.4) / 0.5).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// How hard it rains, 0 (dry) to 1 (a downpour): only under heavy cloud, coming on and
+/// passing over some minutes, in showers within a wet spell. In the cold it is snow that
+/// falls ([`snows`]); how hard is the same.
+pub fn rain(when: f32) -> f32 {
+    use std::f32::consts::TAU;
+    // (Clear three fifths of the time, overcast a fifth, raining an eighth, on two days in
+    // five: tuned by those numbers, which the test below holds.)
+    let wet = ((cloud(when) - 0.9) / 0.1).clamp(0.0, 1.0);
+    let shower = 0.65 + 0.35 * (when * TAU * 7.3 + 0.6).sin();
+    (wet * shower).clamp(0.0, 1.0)
+}
+
+/// Whether what falls is snow: in the cold of the year.
+pub fn snows(when: f32) -> bool {
+    warmth(when) < -0.35
+}
+
 /// `when` after `seconds` more.
 pub fn later(when: f32, seconds: f32) -> f32 {
     when + seconds / DAY
@@ -126,6 +153,19 @@ pub fn moonlight(when: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn it_rains_now_and_then_and_not_for_ever() {
+        // Over a year, by the minute: it is clear a good part of the time and overcast some;
+        // it rains a tenth of the time or so, on a fair number of days, in spells of an hour
+        // and more, and neither cloud nor rain ever jumps.
+        let all: Vec<(f32, f32)> = (0..(super::YEAR * 24.0 * 60.0) as u32).map(|m| { let when = 3.0 + m as f32 / (24.0 * 60.0); (super::cloud(when), super::rain(when)) }).collect();
+        let n = all.len() as f32;
+        let (clear, dull, wet) = (all.iter().filter(|w| w.0 < 0.25).count() as f32 / n, all.iter().filter(|w| w.0 > 0.75).count() as f32 / n, all.iter().filter(|w| w.1 > 0.1).count() as f32 / n);
+        let days = all.chunks(24 * 60).filter(|day| day.iter().any(|w| w.1 > 0.1)).count() as f32 / super::YEAR;
+        let jump = all.windows(2).map(|w| (w[1].0 - w[0].0).abs().max((w[1].1 - w[0].1).abs())).fold(0.0, f32::max);
+        assert!(clear > 0.2 && dull > 0.1 && (0.04..0.2).contains(&wet) && (0.15..0.6).contains(&days) && jump < 0.05, "clear {clear:.2} of the time, overcast {dull:.2}, raining {wet:.2}, on {days:.2} of days; the most it changes in a minute {jump:.3}");
+    }
+
     #[test]
     fn the_wind_is_never_still_for_long_nor_always_blowing() {
         // Over a season, by the second: it stays in its range, there are lulls and blows,

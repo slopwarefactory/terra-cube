@@ -998,6 +998,11 @@ impl Sim {
             if k.hours == crate::ecology::Hours::Dusk {
                 agent.mind.about = agent.mind.about.max(0.35);
             }
+            // In the rain most things lie up: under what cover they keep, in a den, on a
+            // bough. Not what lives in the water or at its edge, which is wet anyway.
+            if !matches!(k.water, crate::ecology::Water::In | crate::ecology::Water::Edge) {
+                agent.mind.about *= 1.0 - 0.75 * crate::sky::rain(when);
+            }
             hits.extend(mind::think(id, agent, &self.kinds[agent.kind], &seen, world, self.trails, &mut self.rng));
         }
         // A driven creature's blow: it lands part way through the swing on the nearest thing
@@ -1962,6 +1967,24 @@ mod tests {
             down |= sim.agents[&bird].body.grounded && sim.agents[&bird].body.pos.y < ground + 0.5;
         }
         assert!(down, "by day it never came down: {:.1} m up", sim.agents[&bird].body.pos.y - ground);
+    }
+
+    #[test]
+    fn in_the_rain_what_lives_on_dry_ground_lies_up_and_what_lives_by_water_does_not() {
+        let (world, mut sim) = stage();
+        // The first hard rain of the year, and the same hour of a dry day.
+        let wet = (0..28 * 24).map(|h| 3.0 + h as f32 / 24.0).find(|w| crate::sky::rain(*w) > 0.7).expect("it never rains hard in a year");
+        let dry = (0..28 * 24).map(|h| 3.0 + h as f32 / 24.0).find(|w| crate::sky::rain(*w) == 0.0 && (crate::sky::hour(*w) - crate::sky::hour(wet)).abs() < 0.5).expect("no dry day");
+        sim.kinds[1].water = crate::ecology::Water::Edge;
+        let (rabbit, by_water) = (sim.add(&world, 0, at(0.0, 0.0), 0.0, Driver::Mind), sim.add(&world, 1, at(20.0, 0.0), 0.0, Driver::Mind));
+        let mut about = |when: f32| {
+            sim.when = when;
+            sim.step(&world);
+            (sim.agents[&rabbit].mind.about, sim.agents[&by_water].mind.about)
+        };
+        let (in_rain, in_dry) = (about(wet), about(dry));
+        assert!(in_rain.0 < in_dry.0 * 0.5, "a rabbit is about {:.2} in the rain and {:.2} out of it", in_rain.0, in_dry.0);
+        assert!((in_rain.1 - in_dry.1).abs() < 0.05, "what lives at the water's edge is about {:.2} in the rain and {:.2} out of it", in_rain.1, in_dry.1);
     }
 
     #[test]
