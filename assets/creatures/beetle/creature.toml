@@ -16,6 +16,7 @@ wing = [0.08, 0.05, 0.04]
 mark = [0.16, 0.07, 0.04]
 
 [life]
+jumps = false
 temper = "timid"
 # (Its wings as it lifts them: the dragonfly's buzz.)
 voice = "buzz"

@@ -12,6 +12,7 @@ low = 0.5
 made = ["attack", "hurt", "die"]
 
 [life]
+jumps = false
 temper = "timid"
 voice = "hedgehog"
 habitat = "meadow"

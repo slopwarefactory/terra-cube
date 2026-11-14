@@ -108,6 +108,11 @@ pub struct Life {
     /// Out of its hours it flies up to roost on a bough near where it lives (a bird).
     #[serde(default)]
     pub roost: bool,
+    /// Whether it ever jumps: over what is in its way, or out of a hollow. A tortoise does
+    /// not ("why are turtles jumping?", the developer, 2026-11-14), nor a snake, a crab, a
+    /// hedgehog or a beetle: they go round.
+    #[serde(default = "yes")]
+    pub jumps: bool,
 }
 
 /// What a creature eats.
@@ -146,6 +151,10 @@ impl<'de> Deserialize<'de> for Voice {
 
 fn whole() -> f32 {
     1.0
+}
+
+fn yes() -> bool {
+    true
 }
 
 fn one() -> usize {
@@ -235,6 +244,8 @@ pub struct Kind {
     pub den: bool,
     /// Out of its hours it roosts on a bough (`Mind::perch`).
     pub roosts: bool,
+    /// Whether it ever jumps (`Life::jumps`).
+    pub jumps: bool,
 }
 
 impl Kind {
@@ -362,7 +373,7 @@ impl Kind {
                 }
             };
             // With no [life], a player is a person and anything else just stands its ground.
-            let life = spec.life.unwrap_or(Life { temper: if spec.kind == "player" { Temper::Person } else { Temper::Wary }, habitat: None, group: 1, groups: 0, water: Default::default(), cover: Default::default(), hours: Default::default(), winter: 1.0, voice: None, diet: None, litter: None, lifespan: None, capacity: None, range: None, meal: None, holds: None, share: 1.0, flies: false, den: false, roost: false });
+            let life = spec.life.unwrap_or(Life { temper: if spec.kind == "player" { Temper::Person } else { Temper::Wary }, habitat: None, group: 1, groups: 0, water: Default::default(), cover: Default::default(), hours: Default::default(), winter: 1.0, voice: None, diet: None, litter: None, lifespan: None, capacity: None, range: None, meal: None, holds: None, share: 1.0, flies: false, den: false, roost: false, jumps: true });
             let diet = life.diet.unwrap_or(match life.temper {
                 Temper::Hunter | Temper::Hostile => Diet::Meat,
                 Temper::Person => Diet::All,
@@ -408,6 +419,7 @@ impl Kind {
                 flies: life.flies,
                 den: life.den,
                 roosts: life.roost,
+                jumps: life.jumps,
             });
         }
         kinds
@@ -1717,7 +1729,7 @@ mod tests {
     use cube_voxel::Block;
 
     fn kind(id: &str, temper: Temper, height: f32, speeds: [f32; 3]) -> Kind {
-        Kind { id: id.into(), parts: Vec::new(), feeding: Vec::new(), lying: Vec::new(), height, length: height * 0.8, width: height * 0.4, walk: speeds[0], run: speeds[1], sprint: speeds[2], temper, habitat: Biome::Meadow, group: 2, groups: 3, water: Default::default(), cover: Default::default(), hours: Default::default(), voice: None, winter: 1.0, diet: if matches!(temper, Temper::Hunter | Temper::Hostile) { Diet::Meat } else { Diet::Plants }, litter: 2.0, lifespan: 8.0, capacity: 8, range: 80.0, meal: 6.0, holds: None, share: 1.0, flies: false, den: false, roosts: false }
+        Kind { id: id.into(), parts: Vec::new(), feeding: Vec::new(), lying: Vec::new(), height, length: height * 0.8, width: height * 0.4, walk: speeds[0], run: speeds[1], sprint: speeds[2], temper, habitat: Biome::Meadow, group: 2, groups: 3, water: Default::default(), cover: Default::default(), hours: Default::default(), voice: None, winter: 1.0, diet: if matches!(temper, Temper::Hunter | Temper::Hostile) { Diet::Meat } else { Diet::Plants }, litter: 2.0, lifespan: 8.0, capacity: 8, range: 80.0, meal: 6.0, holds: None, share: 1.0, flies: false, den: false, roosts: false, jumps: true }
     }
 
     /// Rabbit, wolf, bear, goblin and a person, on a floor of stone 60 m square.

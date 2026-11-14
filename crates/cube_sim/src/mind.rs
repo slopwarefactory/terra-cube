@@ -133,9 +133,13 @@ pub const THIRSTS: f32 = 0.3;
 
 /// The nearest water's edge to a place, within sixty metres: the last dry ground before it,
 /// looking out sixteen ways. Water stands at the sea's level everywhere, river and lake too.
+/// Whether there is water at a place: the sea's, a lake's or a river's, at their level.
+fn wet(world: &World, p: Vec2) -> bool {
+    world.get(IVec3::new(cell_of(p.x), crate::terrain::SEA - 1, cell_of(p.y))) == Block::Water
+}
+
 fn water_near(world: &World, me: Vec2) -> Option<Vec2> {
-    let level = crate::terrain::SEA - 1;
-    let wet = |p: Vec2| world.get(IVec3::new(cell_of(p.x), level, cell_of(p.y))) == Block::Water;
+    let wet = |p: Vec2| wet(world, p);
     let mut best: Option<(f32, Vec2)> = None;
     for turn in 0..16 {
         let way = Vec2::from_angle(turn as f32 * std::f32::consts::TAU / 16.0);
@@ -469,7 +473,9 @@ pub fn think(id: u32, agent: &mut Agent, kind: &Kind, seen: &[Seen], world: &Wor
                 // What eats plants grazes because it is hungry: full, it does not; empty, it does little else.
                 let grazes = matches!(kind.diet, crate::life::Diet::Plants | crate::life::Diet::All) && kind.temper != Temper::Hostile;
                 let roll = rng.unit();
-                if grazes && roll < ((agent.hunger - 0.15) * 1.6).clamp(0.0, 0.95) {
+                // (Not standing in water: "deer end up walking into water and eating
+                // animation there? Makes no sense", the developer, 2026-11-14.)
+                if grazes && !wet(world, me) && roll < ((agent.hunger - 0.15) * 1.6).clamp(0.0, 0.95) {
                     m.state = State::Graze;
                     m.left = rng.between(8.0, 18.0);
                     m.bout = true;
@@ -534,11 +540,14 @@ pub fn think(id: u32, agent: &mut Agent, kind: &Kind, seen: &[Seen], world: &Wor
         State::Roam => {
             heading = toward(m.goal).filter(|_| me.distance(m.goal) > 0.8);
             // Come to the water it set out for, it drinks: head down a few seconds.
-            if m.to_water && (heading.is_none() || agent.body.swimming) {
+            // (At the water's edge, from the bank: with water before its nose it has come
+            // to it. It walked on to a place that was as often a metre out in the shallows.)
+            let at_edge = toward(m.goal).is_some_and(|way| wet(world, me + way * (my_reach + 0.3)));
+            if m.to_water && (heading.is_none() || agent.body.swimming || at_edge) {
                 (m.to_water, m.state, m.left) = (false, State::Graze, 6.0);
                 agent.thirst = 0.0;
                 agent.log.drank += 1;
-            } else if (heading.is_none() || m.left <= 0.0) && m.bout {
+            } else if (heading.is_none() || m.left <= 0.0) && m.bout && !wet(world, me) {
                 (m.state, m.left) = (State::Graze, rng.between(8.0, 18.0));
             } else if heading.is_none() || m.left <= 0.0 {
                 // (Water it set out for and did not come to: it makes do a while, as where there is none.)
@@ -665,11 +674,11 @@ pub fn think(id: u32, agent: &mut Agent, kind: &Kind, seen: &[Seen], world: &Wor
     agent.intent.speed = speed;
     agent.gait = gait;
     agent.turn_to = face;
-    if jump {
+    if jump && kind.jumps {
         agent.want_jump = 0.12;
     }
     // Held until the top of the jump, or it is cut to a hop that clears nothing.
-    agent.hold_jump = jump || agent.body.jumping;
+    agent.hold_jump = (jump && kind.jumps) || agent.body.jumping;
     // (How long it has been at rest; and lying is held from tick to tick, not for a time
     // that runs out and has it on its feet for a moment.)
     m.still = if m.state == State::Rest && dir == Vec2::ZERO { m.still + DT } else { 0.0 };
@@ -698,7 +707,7 @@ pub fn think(id: u32, agent: &mut Agent, kind: &Kind, seen: &[Seen], world: &Wor
                 }
                 (m.state, m.bout) = (State::Rest, false);
                 m.left = rng.between(0.5, 2.0);
-            } else {
+            } else if kind.jumps {
                 agent.want_jump = 0.12;
             }
         }
