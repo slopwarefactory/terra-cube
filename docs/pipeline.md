@@ -156,6 +156,39 @@ The game draws them as `creatures::Picture`: a model and its clips with no body 
 - **Made grazing (`eat`) aims the muzzle at the ground, and the muzzle is read from the skin** (2026-11-11): no bone ends at a muzzle and the head role is unreliable (a goat's one head bone carries only its horns), so `check::nose` takes the skin's corner furthest forward and low. The neck is whatever of spine and head lies ahead of the shoulders or just behind; it swings down from its root, and past that the body tips forward about the hips with the fore legs giving. A bone well behind the shoulders turns 0.45 rad at most (a bear folded in half), and a body on legs with no knee does not tip (a moose's feet went through the floor). Before, one bone took a fixed dip: a pony's neck rolled up under its chest and a goat's hardly moved. Judge on one sheet of several animals from the side (`cargo sandbox --shot ID --view side --clips eat`).
 - **Tried and dropped:** locking a recorded gait's feet to a line and stretching its stride; replacing a recorded walk with a made one; putting CMU capture on Tripo's skeleton in Blender by turns from rest (twisted trunk: the rests were not the same pose, which the library's carrying allows for); Tripo's `slash` for a blow (a slow two-handed chop that bowed the whole body), with the arm then posed over it from `held.toml` (the two fought). A hand-animated CC0 animal (Quaternius) moves better than our made gaits and looks plainer: [research](research/2026-11-11-animal-animation.md).
 
+## What motion has to be, before any of it is tuned
+
+Written 2026-11-14, after a day of softening the player's code-made body and the developer
+still seeing it stiff: "it sounds like we're just missing some fundamentals to how animations
+should behave or be designed". These are the fundamentals; a fault in motion is first asked
+which of them it breaks, and only then tuned.
+
+1. **One performance moves the whole body.** A body reads as alive when its parts answer one
+   another: the shoulders to the hips, the arms to the legs, the head to the trunk. A recorded
+   or hand-animated clip has that in it. A body whose legs are one model and whose arms and
+   chest are formulas beside it does not, however the formulas are softened.
+2. **Code corrects a performance; it does not replace it.** What code is for: feet onto the
+   ground that is there, the hips let down for them, a lean into speeding up and into a turn,
+   a look toward something, a held thing. Each is a layer added over the clip, small, eased,
+   and able to be turned off to see the clip alone.
+3. **Nothing changes at a stroke.** Every value that is drawn (a height, a turn, a weight
+   between two clips) comes to its new value over time. A rule that holds at a stroke (a leg
+   no longer than it is, a body out of the ground) is met by what feeds it, not by a jump.
+4. **A gait is paced by the ground.** The stride's place in its cycle goes forward by
+   distance covered, not by time, and gaits that are mixed share that one place, so a foot
+   that is down is still and two clips never fight.
+5. **What is hung from the body comes after it.** Arms, a tail, ears, a held sword trail what
+   carries them and settle after it stops: overlap and follow-through.
+6. **It is judged moving, by numbers that mean what the eye sees.** How fast the trunk rises
+   and how hard it jolts (`trunk` in a scripted scene's lines), whether a standing foot
+   slides, whether a limb is in the ground; then one film, not stills.
+
+Where we stand against them: animals keep 1 (a hand-animated wolf's motion carried by the
+feet) and break 3 at a run on blocks. The player breaks 1 while he moves: his body is the
+walker's legs and formulas above them (`stride`), which is why his shoulders do not answer
+his legs. `--clips-only` is the other way round, the library's recorded walk and run with
+feet put on the ground: `shots/player-compare.mp4` sets the two side by side.
+
 ## Judging motion
 
 **A bird pecks with its whole body** (`crawl.rs`, `eat`, 2026-11-13): it tips forward over its feet, which stay put, as far as brings its beak to the ground with its neck down, by its own leg, body and neck. By its own boxes, to the centimetre, and only up from the ground and back: by a rule of thumb a duck's beak went into the ground and a heron's stopped short. A blow or a flinch made for an animal on our own skeleton is raised, any moment its lowest skin would be under the floor, as what is built of boxes is (`finish.rs`). With only the neck turned, every bird's beak pointed down at the height of its back. Found by looking at all six from the side on one sheet; the other clips of everything built of boxes, and jump, fall, land and idle of every four-legged animal, were looked at the same day and nothing else was wrong. The hedgehog stood tall on straight legs and the rabbit upright: each now has `low` in its `creature.toml` (how far down on its legs it stands and goes, of 1; `own.rs` bakes its idle and gaits there), the rabbit moved to our own skeleton for it with its hop kept, and the blow, flinch and death of each are `made`, from where it stands, since the wolf's carried over began with it up on straight legs.
